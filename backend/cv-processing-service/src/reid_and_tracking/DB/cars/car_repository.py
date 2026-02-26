@@ -19,7 +19,7 @@ class CarRepository:
     def add_car(self, car_number: str) -> Optional[int]:
         """Добавляет новый автомобиль и возвращает его ID"""
         query = """
-            INSERT INTO cars (car_number)
+            INSERT INTO vehicles (car_number)
             VALUES (%s)
             RETURNING car_id
         """
