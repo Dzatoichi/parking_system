@@ -13,8 +13,8 @@ class SpotCoordinates(BaseSchema):
     center_x / center_y — геометрический центр (для поиска ближайшего места).
     """
     points: list[list[float]] = Field(
-        min_length=3,
-        description="Минимум 3 точки [[x1,y1],[x2,y2],[x3,y3]]",
+        min_length=4,
+        description="4 точки [[x1,y1],[x2,y2],[x3,y3]]",
         examples=[[[10.0, 20.0], [50.0, 20.0], [50.0, 60.0], [10.0, 60.0]]],
     )
     center_x: float
