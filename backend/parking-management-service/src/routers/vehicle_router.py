@@ -5,6 +5,7 @@ from src.schemas import (
     VehicleRead,
     VehicleLocationUpdate,
     VehicleRouteRead,
+    VehicleFullInfo,
     PaginatedResponse,
 )
 from src.utils.dependencies import VehicleServiceDep
@@ -62,6 +63,20 @@ async def get_vehicle_history(
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> VehicleRouteRead:
     return await service.get_vehicle_history(vehicle_id, limit=limit)
+
+
+@vehicle_router.get("/{vehicle_id}/full", response_model=VehicleFullInfo)
+async def get_vehicle_full_info(
+    vehicle_id: int,
+    service: VehicleServiceDep,
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> VehicleFullInfo:
+    """
+    Полная информация об автомобиле:
+    - базовые данные (id, номер, is_inside, last_seen, last_camera_id)
+    - история перемещений (последние N событий).
+    """
+    return await service.get_vehicle_full_info(vehicle_id, limit=limit)
 
 
 @vehicle_router.delete("/{vehicle_id}", status_code=status.HTTP_204_NO_CONTENT)

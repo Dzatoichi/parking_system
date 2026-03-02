@@ -13,6 +13,7 @@ from src.schemas import (
     VehicleLocationUpdate,
     VehicleRouteRead,
     TrackingEventRead,
+    VehicleFullInfo,
     PaginatedResponse,
 )
 
@@ -147,6 +148,36 @@ class VehicleService:
             plate_number=vehicle.plate_number,
             events=[self._event_to_read(e) for e in events],
             total_events=len(events),
+        )
+
+    async def get_vehicle_full_info(
+        self,
+        vehicle_id: int,
+        limit: int = 100,
+    ) -> VehicleFullInfo:
+        """
+        Агрегированная информация об авто:
+        - базовые данные (номер, статус, последняя камера)
+        - история перемещений (последние N событий).
+        """
+        vehicle = await self._dao.get_by_id(vehicle_id)
+        if vehicle is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Автомобиль с id={vehicle_id} не найден",
+            )
+
+        events = await self._tracking_dao.get_vehicle_history(vehicle_id, limit=limit)
+        history = VehicleRouteRead(
+            vehicle_id=vehicle.id,
+            plate_number=vehicle.plate_number,
+            events=[self._event_to_read(e) for e in events],
+            total_events=len(events),
+        )
+
+        return VehicleFullInfo(
+            vehicle=self._to_read(vehicle),
+            history=history,
         )
 
 

@@ -9,7 +9,7 @@ class ParkingCreate(BaseSchema):
     POST /parking/
     """
     name: str = Field(
-        min_length=2,
+        min_length=1,
         max_length=100,
         examples=["Парковка ТЦ Мега"],
     )
@@ -46,7 +46,7 @@ class ParkingUpdate(BaseSchema):
 
     Все поля опциональны — передаём только то, что хотим изменить.
     """
-    name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     address: Optional[str] = Field(default=None, min_length=5, max_length=200)
     is_active: Optional[bool] = None
     settings: Optional[dict] = None

@@ -169,3 +169,14 @@ class VehicleDurationRead(BaseSchema):
         default=None,
         description="None — авто всё ещё на месте",
     )
+
+
+class VehicleFullInfo(BaseSchema):
+    """
+    Полная информация об автомобиле:
+    - общие данные
+    - текущий статус (на парковке / где, последняя камера/место)
+    - последние события истории.
+    """
+    vehicle: VehicleRead
+    history: VehicleRouteRead
