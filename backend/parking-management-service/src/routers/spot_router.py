@@ -2,23 +2,23 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, status
 
-from src.models.spots.status.spot_status import SpotStatus
-from src.models.spots.type.spot_type import SpotType
-from src.schemas.spots_schemas import (
+from src.models.status.spot_status import SpotStatus
+from src.models.type.spot_type import SpotType
+from src.schemas.spot_schemas import (
     SpotCreate,
     SpotRead,
     SpotReadShort,
     SpotStatusUpdate,
     SpotCoordinatesUpdate,
-    PaginatedResponse,
-    ParkingStats,
 )
+from src.schemas.parking_schemas import ParkingStats
+from src.schemas.common import PaginatedResponse
 from src.utils.dependencies import SpotServiceDep
 
-spots_router = APIRouter(prefix="/spots", tags=["spots"])
+spot_router = APIRouter(prefix="/spots", tags=["spots"])
 
 
-@spots_router.get(
+@spot_router.get(
     "/{parking_id}",
     response_model=PaginatedResponse[SpotReadShort],
     summary="Список мест парковки",
@@ -40,7 +40,7 @@ async def get_spots(
     )
 
 
-@spots_router.get(
+@spot_router.get(
     "/{parking_id}/stats",
     response_model=ParkingStats,
     summary="Статистика мест парковки",
@@ -52,7 +52,7 @@ async def get_stats(
     return await service.get_parking_stats(parking_id)
 
 
-@spots_router.get(
+@spot_router.get(
     "/detail/{spot_id}",
     response_model=SpotRead,
     summary="Получить место по ID",
@@ -64,7 +64,7 @@ async def get_spot(
     return await service.get_spot(spot_id)
 
 
-@spots_router.post(
+@spot_router.post(
     "/{parking_id}",
     response_model=SpotRead,
     status_code=status.HTTP_201_CREATED,
@@ -78,7 +78,7 @@ async def create_spot(
     return await service.create_spot(parking_id, body)
 
 
-@spots_router.post(
+@spot_router.post(
     "/{parking_id}/bulk",
     response_model=list[SpotRead],
     status_code=status.HTTP_201_CREATED,
@@ -92,7 +92,7 @@ async def create_spots_bulk(
     return await service.create_spots_bulk(parking_id, body)
 
 
-@spots_router.patch(
+@spot_router.patch(
     "/{spot_id}/status",
     response_model=SpotRead,
     summary="Сменить статус места",
@@ -105,7 +105,7 @@ async def change_status(
     return await service.change_status(spot_id, body)
 
 
-@spots_router.patch(
+@spot_router.patch(
     "/{spot_id}/coordinates",
     response_model=SpotRead,
     summary="Обновить разметку места",
@@ -118,7 +118,7 @@ async def update_coordinates(
     return await service.update_coordinates(spot_id, body)
 
 
-@spots_router.delete(
+@spot_router.delete(
     "/{spot_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Удалить место",

@@ -1,8 +1,8 @@
 from typing import Optional
 from pydantic import Field, model_validator
 from .base_schema import BaseSchema
-from src.models.spots.status.spot_status import SpotStatus
-from src.models.spots.type.spot_type import SpotType
+from src.models.status.spot_status import SpotStatus
+from src.models.type.spot_type import SpotType
 
 class SpotCoordinates(BaseSchema):
     """

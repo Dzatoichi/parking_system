@@ -1,7 +1,3 @@
-"""
-tests/conftest.py — общие фикстуры для всех тестов.
-"""
-
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
@@ -12,7 +8,6 @@ from sqlalchemy.ext.asyncio import (
 
 from src.database.base import Base
 
-# Импорты нужны, чтобы SQLAlchemy увидел все таблицы в Base.metadata
 from src.models.spots import Spot           # noqa: F401
 from src.models.parkings import ParkingBase # noqa: F401
 from src.models.cameras import Cameras      # noqa: F401

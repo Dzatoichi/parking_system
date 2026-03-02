@@ -1,7 +1,7 @@
 from typing import Optional
 from pydantic import Field, field_validator, AnyUrl
 from .base_schema import BaseSchema
-from src.models.cameras.status.camera_status import CameraStatus
+from src.models.status.camera_status import CameraStatus
 
 
 class CameraCreate(BaseSchema):

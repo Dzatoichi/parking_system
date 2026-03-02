@@ -5,7 +5,7 @@ from .base_schema import BaseSchema
 from .common import PaginatedResponse, ErrorResponse, SuccessResponse
 
 from .parking_schemas import ParkingCreate, ParkingUpdate, ParkingRead, ParkingStats
-from .spots_schemas import (
+from .spot_schemas import (
     SpotCoordinates,
     SpotCreate,
     SpotStatusUpdate,

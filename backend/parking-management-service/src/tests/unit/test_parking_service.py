@@ -136,7 +136,7 @@ class TestUpdateParking:
         mock_dao.get_by_id.return_value = None
 
         with pytest.raises(HTTPException) as exc:
-            await service.update_parking(99, ParkingUpdate(name="X"))
+            await service.update_parking(99, ParkingUpdate(name="XX"))
 
         assert exc.value.status_code == 404
 

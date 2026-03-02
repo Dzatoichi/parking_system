@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from src.dao.spot_dao import SpotDAO
-from src.models.spots.spot import Spot
-from src.models.spots.status.spot_status import SpotStatus
-from src.models.spots.type.spot_type import SpotType
+from src.dao.spot_dao import SpotsDAO
+from src.models.spots import Spot
+from src.models.status.spot_status import SpotStatus
+from src.models.type.spot_type import SpotType
 from src.schemas import (
     SpotCreate,
     SpotRead,

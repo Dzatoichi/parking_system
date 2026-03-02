@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, and_
 
-from src.models.spots.spot import Spot
-from src.models.spots.status.spot_status import SpotStatus
-from src.models.spots.type.spot_type import SpotType
+from src.models.spots import Spot
+from src.models.status.spot_status import SpotStatus
+from src.models.type.spot_type import SpotType
 
 
 class SpotsDAO:

@@ -20,8 +20,8 @@ from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
 
 from src.routers.parking_router import parking_router
-from src.routers.cameras_router import cameras_router
-from src.routers.vehicles_router import vehicles_router
+from src.routers.camera_router import camera_router
+from src.routers.vehicle_router import vehicle_router
 
 from src.utils.dependencies import (
     get_parking_service, get_camera_service, get_vehicle_service
@@ -30,10 +30,6 @@ from src.services.parking_service import ParkingService
 from src.services.camera_service import CameraService
 from src.services.vehicle_service import VehicleService
 
-
-# ──────────────────────────────────────────────────────────────
-# Клиентские фикстуры (переопределяют зависимости через реальную сессию)
-# ──────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture
 async def parking_client(session) -> AsyncClient:

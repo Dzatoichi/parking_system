@@ -11,7 +11,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.base import db_helper
-from src.services.spots_service import SpotService
+from src.services.spot_service import SpotService
 from src.services.parking_service import ParkingService
 from src.services.camera_service import CameraService
 from src.services.vehicle_service import VehicleService
