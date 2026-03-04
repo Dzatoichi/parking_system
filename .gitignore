@@ -4,5 +4,5 @@ __pycache__
 .idea
 .venv
 videos
-.parking_marker
-.cameras_network
+parking_marker
+cameras_network
