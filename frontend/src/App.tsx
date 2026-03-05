@@ -34,7 +34,7 @@ export default function App() {
   const renderScreen = () => {
     switch (currentScreen) {
       case "dashboard":
-        return <Dashboard />;
+        return <Dashboard onNavigate={setCurrentScreen} />;
       case "parking-map":
         return <ParkingMap />;
       case "vehicle-search":

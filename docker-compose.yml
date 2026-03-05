@@ -45,8 +45,6 @@ services:
     container_name: parking-frontend
     depends_on:
       - parking-management-service
-    environment:
-      - VITE_API_BASE_URL=http://parking-management-service:8000
     ports:
       - "3000:80"
     networks:

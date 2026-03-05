@@ -32,7 +32,7 @@ class SpotService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._dao = SpotDAO(session)
+        self._dao = SpotsDAO(session)
 
     async def get_spot(self, spot_id: int) -> SpotRead:
         spot = await self._dao.get_by_id(spot_id)
