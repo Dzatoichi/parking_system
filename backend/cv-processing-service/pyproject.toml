@@ -1,0 +1,19 @@
+[project]
+name = "cv-processing-service"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Den4ik", email = "kvndp2004@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi (>=0.129.0,<0.130.0)",
+    "uvicorn (>=0.40.0,<0.41.0)",
+    "pydantic (>=2.12.0,<3.0.0)",
+    "pydantic-settings (>=2.0,<3.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
