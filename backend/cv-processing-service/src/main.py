@@ -6,9 +6,9 @@
 
 from fastapi import FastAPI
 
-from src.routers.cv_job_router import cv_job_router
-from src.routers.health_router import health_router
-from src.settings.config import settings
+from src.api.routers.cv_job_router import cv_job_router
+from src.api.routers.health_router import health_router
+from src.api.settings.config import settings
 
 app = FastAPI(title=settings.APP_TITLE)
 

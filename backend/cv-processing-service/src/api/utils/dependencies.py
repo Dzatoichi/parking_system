@@ -6,8 +6,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from src.repositories.cv_job_repository import CVJobRepository
-from src.services.cv_job_service import CVJobService
+from src.api.repositories.cv_job_repository import CVJobRepository
+from src.api.services.cv_job_service import CVJobService
 
 _cv_job_repository = CVJobRepository()
 

@@ -4,8 +4,8 @@ HTTP-роутер для операций с CV задачами.
 
 from fastapi import APIRouter, status
 
-from src.schemas import CVJobCreate, CVJobRead
-from src.utils.dependencies import CVJobServiceDep
+from src.api.schemas import CVJobCreate, CVJobRead
+from src.api.utils.dependencies import CVJobServiceDep
 
 cv_job_router = APIRouter(prefix="/v1/jobs", tags=["cv-jobs"])
 

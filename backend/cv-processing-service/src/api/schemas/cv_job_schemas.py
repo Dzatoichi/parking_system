@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from src.schemas.base_schema import BaseSchema
+from src.api.schemas.base_schema import BaseSchema
 
 JobStatus = Literal["queued", "running", "completed", "failed", "stopped"]
 

@@ -4,8 +4,8 @@ Service-слой CV Processing.
 
 from fastapi import HTTPException, status
 
-from src.repositories.cv_job_repository import CVJobRepository
-from src.schemas import CVJobCreate, CVJobRead
+from src.api.repositories.cv_job_repository import CVJobRepository
+from src.api.schemas import CVJobCreate, CVJobRead
 
 
 class CVJobService:
