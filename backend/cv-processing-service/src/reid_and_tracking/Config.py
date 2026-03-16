@@ -1,20 +1,22 @@
-import os
-from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class Config:
-    BASE_DIR = Path(__file__).parent
+class Settings(BaseSettings):
+    """
+    Класс конфига для работы с БД и моделями.
+    """
+    DB_HOST: str
+    DB_PORT: str
+    DB_USER: str
+    DB_PASS: str
+    DB_NAME: str
 
-    DB_PARAMS = {
-        'database': "parking_db",
-        'user': "tracklet_manager",
-        'password': "tracklet_manager",
-        'host': "127.0.0.1",
-        'port': "5432",
-    }
+    OSNET_MODEL_PATH: str
+    YOLO_PLATE_MODEL_PATH: str
+    YOLO_CAR_MODEL_PATH: str
+    OCR_MODEL_PATH: str
 
-    OSNET_MODEL_PATH = str(BASE_DIR / "Models/Tracking/OSNet/model_veri_1.pth")
-    YOLO_PLATE_MODEL_PATH = str(BASE_DIR / "Models/PlateRecognition/YOLOv8/best.pt")
-    YOLO_CAR_MODEL_PATH = str(BASE_DIR / "Models/Tracking/YOLOv11/yolo11m.pt")
-    OCR_MODEL_PATH = str(BASE_DIR / "Models/PlateRecognition/OCR_CRNN/crnn_ocr_model_int8_fx.pth")
+    DEVICE: str
 
-    DEVICE: str = "cpu"
+    model_config = SettingsConfigDict(env_file='src/.env')
+
+settings = Settings()

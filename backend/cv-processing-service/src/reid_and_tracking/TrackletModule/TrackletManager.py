@@ -7,7 +7,7 @@ from FeaturesModule.FeaturesManager import FeaturesManager
 from TrackletModule.FindStorage import FindStorage
 from DB.database_manager import DatabaseManager
 from DB.features.feature_repository import CarFeatureRepository
-from Config import Config
+from Config import Settings
 
 
 class TrackletManager:
@@ -17,7 +17,7 @@ class TrackletManager:
         self.frames_for_confirm = frames_for_confirm
         self.frames_for_lost = frames_for_lost
 
-        self.feats_manager = FeaturesManager(Config.OSNET_MODEL_PATH)
+        self.feats_manager = FeaturesManager(Settings.OSNET_MODEL_PATH)
 
         self.matcher: Matcher = Matcher(
             features_manager=self.feats_manager,
@@ -27,7 +27,13 @@ class TrackletManager:
 
         self.t_storage = TrackletStorage()
 
-        db_manager = DatabaseManager(**Config.DB_PARAMS)
+        db_manager = DatabaseManager(
+            database=Settings.DB_NAME,
+            user=Settings.DB_USER,
+            password=Settings.DB_PASS,
+            host=Settings.DB_HOST,
+            port=Settings.DB_PORT,
+        )
         db_manager.connect()
         self.car_feature_repository = CarFeatureRepository(db_manager=db_manager)
 

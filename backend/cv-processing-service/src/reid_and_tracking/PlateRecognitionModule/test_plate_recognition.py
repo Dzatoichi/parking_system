@@ -1,7 +1,7 @@
 import cv2
 from ultralytics import YOLO
 
-from Config import Config
+from Config import Settings
 from PlateRecognitionModule.core.PlateRecognizer import PlateRecognizer
 
 plate_rec = PlateRecognizer()
@@ -21,7 +21,7 @@ TRACKER_CFG = "../vehicle_bytetrack_conf.yaml"
 # Инициализация
 # ===============================
 # model = YOLO(MODEL_PATH)
-model = YOLO(Config.YOLO_CAR_MODEL_PATH)
+model = YOLO(Settings.YOLO_CAR_MODEL_PATH)
 cap = cv2.VideoCapture(VIDEO_PATH)
 
 SHOW_VIDEO = True  # True - показывать на экране, False - только запись в файл

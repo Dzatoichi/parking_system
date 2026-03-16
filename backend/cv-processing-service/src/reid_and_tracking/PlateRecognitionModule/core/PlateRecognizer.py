@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
 import numpy as np
 
-from Config import Config
+from Config import Settings
 from PlateRecognitionModule.core.CRNN import CRNNRecognizer
 from PlateRecognitionModule.core.YOLODetector import YOLODetector
 import PlateRecognitionModule.core.utils as utils
@@ -11,8 +11,8 @@ class PlateRecognizer:
     """Главный класс, управляющий процессом распознавания."""
 
     def __init__(self):
-        self.detector = YOLODetector(Config.YOLO_PLATE_MODEL_PATH, device=Config.DEVICE)
-        self.recognizer = CRNNRecognizer(Config.OCR_MODEL_PATH, device=Config.DEVICE)
+        self.detector = YOLODetector(Settings.YOLO_PLATE_MODEL_PATH, device=Settings.DEVICE)
+        self.recognizer = CRNNRecognizer(Settings.OCR_MODEL_PATH, device=Settings.DEVICE)
 
     def process_frame(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         detections = self.detector.detect(frame=frame)
