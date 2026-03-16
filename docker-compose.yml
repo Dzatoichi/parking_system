@@ -44,29 +44,6 @@ services:
 #    volumes:
 #      - ./backend/parking-management-service:/app
 
-  cv-processing-service:
-    build:
-      context: ./backend/cv-processing-service
-      dockerfile: Dockerfile
-    container_name: cv-processing-service
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./backend/cv-processing-service:/app
-
-  stream-ingest-service:
-    build:
-      context: ./backend/stream-ingest-service
-      dockerfile: Dockerfile
-    container_name: stream-ingest-service
-    depends_on:
-      - cv-processing-service
-    environment:
-      CV_SERVICE_URL: http://cv-processing-service:8001
-    ports:
-      - "8002:8002"
-    volumes:
-      - ./backend/stream-ingest-service:/app
 
   cv-processing-service:
     build:
