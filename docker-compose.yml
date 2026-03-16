@@ -35,8 +35,38 @@ services:
       DB_PORT: 5432
     ports:
       - "8000:8000"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+#    volumes:
+#      - ./backend/parking-management-service:/app
+
+  cv-processing-service:
+    build:
+      context: ./backend/cv-processing-service
+      dockerfile: Dockerfile
+    container_name: cv-processing-service
+    ports:
+      - "8001:8001"
     volumes:
-      - ./backend/parking-management-service:/app
+      - ./backend/cv-processing-service:/app
+
+  stream-ingest-service:
+    build:
+      context: ./backend/stream-ingest-service
+      dockerfile: Dockerfile
+    container_name: stream-ingest-service
+    depends_on:
+      - cv-processing-service
+    environment:
+      CV_SERVICE_URL: http://cv-processing-service:8001
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./backend/stream-ingest-service:/app
 
   frontend:
     build:
@@ -44,7 +74,8 @@ services:
       dockerfile: Dockerfile
     container_name: parking-frontend
     depends_on:
-      - parking-management-service
+      parking-management-service:
+        condition: service_healthy
     ports:
       - "3000:80"
     networks:

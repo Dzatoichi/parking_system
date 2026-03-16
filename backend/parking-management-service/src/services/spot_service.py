@@ -17,6 +17,7 @@ from src.schemas import (
     PaginatedResponse,
     ParkingStats,
 )
+from src.dao.parking_dao import ParkingDAO
 
 
 class SpotService:
@@ -33,6 +34,7 @@ class SpotService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._dao = SpotsDAO(session)
+        self._parking_dao = ParkingDAO(session)
 
     async def get_spot(self, spot_id: int) -> SpotRead:
         spot = await self._dao.get_by_id(spot_id)
@@ -171,6 +173,8 @@ class SpotService:
             new_status=data.status,
             vehicle_id=data.vehicle_id,
         )
+        stats = await self._dao.get_stats(spot.parking_id)
+        await self._parking_dao.update(spot.parking_id, {"available_spots": stats["free"]})
         await self._session.commit()
         return SpotRead.model_validate(updated)
 

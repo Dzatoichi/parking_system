@@ -106,3 +106,22 @@ class TrackingDAO:
             select(Tracking).where(Tracking.id == event_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_spot_history(
+            self,
+            spot_id: int,
+            from_dt: datetime,
+            to_dt: datetime,
+            limit: int = 100,
+    ) -> list[Tracking]:
+        result = await self._session.execute(
+            select(Tracking)
+            .where(
+                Tracking.spot_id == spot_id,
+                Tracking.timestamp >= from_dt,
+                Tracking.timestamp <= to_dt,
+            )
+            .order_by(Tracking.timestamp.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
