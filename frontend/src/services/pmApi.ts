@@ -39,7 +39,17 @@ export type ParkingRead = {
   is_active: boolean;
 };
 
-export type CameraStatus = "ACTIVE" | "INACTIVE" | "ERROR";
+export type ParkingStats = {
+  parking_id: number;
+  total_spots: number;
+  free: number;
+  occupied: number;
+  reserved: number;
+  occupancy_rate: number;
+  avg_duration_minutes: number | null;
+};
+
+export type CameraStatus = "active" | "inactive" | "maintenance" | "error";
 
 export type CameraRead = {
   id: number;
@@ -74,8 +84,8 @@ export type CameraUpdate = Partial<{
   is_calibrated: boolean;
 }>;
 
-export type SpotStatus = "FREE" | "OCCUPIED" | "RESERVED";
-export type SpotType = "STANDARD" | "DISABLED" | "EV" | "MOTORCYCLE";
+export type SpotStatus = "free" | "occupied" | "reserved";
+export type SpotType = "standard" | "disabled";
 
 export type SpotReadShort = {
   id: number;
@@ -94,6 +104,30 @@ export type SpotCoordinates = {
 export type SpotRead = SpotReadShort & {
   spot_coordinates: SpotCoordinates;
   parking_id: number;
+};
+
+export type VehicleRead = {
+  id: number;
+  plate_number: string;
+  is_inside: boolean;
+  is_blocked: boolean;
+  last_seen: string | null;
+  last_camera_id: number | null;
+};
+
+export type TrackingEventRead = {
+  id: number;
+  camera_id: number;
+  spot_id: number | null;
+  event_type: string;
+  timestamp: string;
+};
+
+export type VehicleRouteRead = {
+  vehicle_id: number;
+  plate_number: string;
+  events: TrackingEventRead[];
+  total_events: number;
 };
 
 export const parkingApi = {
@@ -116,11 +150,23 @@ export const spotApi = {
     pmApi.get<PaginatedResponse<SpotReadShort>>(`/spots/${parkingId}`, {
       params,
     }),
+  getStats: (parkingId: number) => pmApi.get<ParkingStats>(`/spots/${parkingId}/stats`),
   getDetail: (spotId: number) => pmApi.get<SpotRead>(`/spots/detail/${spotId}`),
   create: (parkingId: number, body: { spot_number: string; spot_type?: SpotType; spot_coordinates: SpotCoordinates }) =>
     pmApi.post<SpotRead>(`/spots/${parkingId}`, body),
   updateCoordinates: (spotId: number, body: { spot_coordinates: SpotCoordinates }) =>
     pmApi.patch<SpotRead>(`/spots/${spotId}/coordinates`, body),
   delete: (spotId: number) => pmApi.delete(`/spots/${spotId}`),
+};
+
+export const vehicleApi = {
+  getAll: (params?: { only_inside?: boolean; page?: number; size?: number }) =>
+    pmApi.get<PaginatedResponse<VehicleRead>>("/vehicles", { params }),
+  getByPlate: (plateNumber: string) =>
+    pmApi.get<VehicleRead>(`/vehicles/by-plate/${encodeURIComponent(plateNumber)}`),
+  getHistory: (vehicleId: number, params?: { limit?: number }) =>
+    pmApi.get<VehicleRouteRead>(`/vehicles/${vehicleId}/history`, { params }),
+  setBlockByPlate: (plateNumber: string, blocked: boolean) =>
+    pmApi.patch<VehicleRead>(`/vehicles/by-plate/${encodeURIComponent(plateNumber)}/block`, { blocked }),
 };
 

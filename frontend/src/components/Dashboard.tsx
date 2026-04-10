@@ -1,14 +1,53 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Car, Clock, TrendingUp, Camera, ParkingSquare } from "lucide-react";
 import { Card } from './ui/card';
 import type { Screen } from "../App";
+import { parkingApi, spotApi } from "../services/pmApi";
+import type { ParkingRead, ParkingStats } from "../services/pmApi";
 
 export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => void }) {
-  const stats = [
-    { label: 'Всего мест', value: '150', icon: Car, color: 'bg-blue-600' },
-    { label: 'Свободно', value: '45', icon: Car, color: 'bg-green-600' },
-    { label: 'Занято', value: '105', icon: Car, color: 'bg-red-600' },
-  ];
+  const [parking, setParking] = useState<ParkingRead | null>(null);
+  const [statsData, setStatsData] = useState<ParkingStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const parkingRes = await parkingApi.getAll({ only_active: true, page: 1, size: 1 });
+        const firstParking = parkingRes.data.items[0];
+        if (!firstParking) {
+          setError("Нет активных парковок. Добавьте данные в БД.");
+          return;
+        }
+        setParking(firstParking);
+        const statsRes = await spotApi.getStats(firstParking.id);
+        setStatsData(statsRes.data);
+      } catch (e: any) {
+        setError(e?.response?.data?.detail ?? e?.message ?? "Ошибка загрузки данных");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const stats = useMemo(() => {
+    if (!statsData) {
+      return [
+        { label: 'Всего мест', value: '-', icon: Car, color: 'bg-blue-600' },
+        { label: 'Свободно', value: '-', icon: Car, color: 'bg-green-600' },
+        { label: 'Занято', value: '-', icon: Car, color: 'bg-red-600' },
+      ];
+    }
+    return [
+      { label: 'Всего мест', value: String(statsData.total_spots), icon: Car, color: 'bg-blue-600' },
+      { label: 'Свободно', value: String(statsData.free), icon: Car, color: 'bg-green-600' },
+      { label: 'Занято', value: String(statsData.occupied), icon: Car, color: 'bg-red-600' },
+    ];
+  }, [statsData]);
 
   const recentEvents = [
     { type: 'entry', plate: 'A123BC', time: '14:32', action: 'Въезд на парковку' },
@@ -29,8 +68,12 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">Панель управления</h1>
-        <p className="text-gray-600">Обзор состояния парковочной системы в реальном времени</p>
+        <p className="text-gray-600">
+          {parking ? `Обзор: ${parking.name}, ${parking.address}` : "Обзор состояния парковочной системы в реальном времени"}
+        </p>
       </div>
+      {loading && <p className="text-sm text-gray-500">Загрузка данных...</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {/* Quick actions */}
       <div className="grid grid-cols-2 gap-6">
@@ -159,7 +202,9 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
                 <span className="text-sm text-gray-600">Занято</span>
               </div>
             </div>
-            <span className="text-sm text-gray-500">Заполненность 70%</span>
+            <span className="text-sm text-gray-500">
+              Заполненность {statsData ? `${Math.round(statsData.occupancy_rate * 100)}%` : "-"}
+            </span>
           </div>
         </Card>
       </div>

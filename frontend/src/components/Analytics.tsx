@@ -1,6 +1,6 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, Users, Clock, DollarSign } from 'lucide-react';
+import { TrendingUp, Users, Clock } from 'lucide-react';
 import { Card } from './ui/card';
 
 export function Analytics() {
@@ -35,7 +35,6 @@ export function Analytics() {
   ];
 
   const metrics = [
-    { label: 'Дневной доход', value: '$1,247', change: '+12%', icon: DollarSign, color: 'text-green-600' },
     { label: 'Ср. длительность', value: '2.5ч', change: '+5%', icon: Clock, color: 'text-blue-600' },
     { label: 'Пик заполненности', value: '96%', change: '+3%', icon: TrendingUp, color: 'text-purple-600' },
     { label: 'Уникальных посетителей', value: '234', change: '+8%', icon: Users, color: 'text-orange-600' },
@@ -49,7 +48,7 @@ export function Analytics() {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-3 gap-6">
         {metrics.map((metric, index) => {
           const Icon = metric.icon;
           return (

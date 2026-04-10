@@ -10,6 +10,7 @@ from src.models.tracking import Tracking
 from src.schemas import (
     VehicleCreate,
     VehicleRead,
+    VehicleBlockUpdate,
     VehicleLocationUpdate,
     VehicleRouteRead,
     TrackingEventRead,
@@ -82,12 +83,20 @@ class VehicleService:
 
         # Авто видим впервые — регистрируем автоматически
         if vehicle is None:
+            if data.event_type == "enter":
+                # Для незарегистрированного авто не блокируем вход автоматически.
+                pass
             vehicle = Vehicles(
                 plate_number=data.plate_number,
                 is_inside=data.event_type == "enter",
             )
             vehicle = await self._dao.create(vehicle)
         else:
+            if vehicle.is_blocked and data.event_type == "enter":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Въезд запрещен для автомобиля '{vehicle.plate_number}'",
+                )
             is_inside = vehicle.is_inside
             if data.event_type == "enter":
                 is_inside = True
@@ -113,6 +122,21 @@ class VehicleService:
         await self._session.commit()
 
         return self._to_read(vehicle)
+
+    async def set_vehicle_block_by_plate(
+        self,
+        plate_number: str,
+        body: VehicleBlockUpdate,
+    ) -> VehicleRead:
+        vehicle = await self._dao.get_by_plate(plate_number.upper())
+        if vehicle is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Автомобиль с номером '{plate_number}' не найден",
+            )
+        updated = await self._dao.set_blocked(vehicle.id, body.blocked)
+        await self._session.commit()
+        return self._to_read(updated)
 
     async def delete_vehicle(self, vehicle_id: int) -> None:
         vehicle = await self._dao.get_by_id(vehicle_id)
@@ -187,6 +211,7 @@ class VehicleService:
             id=vehicle.id,
             plate_number=vehicle.plate_number,
             is_inside=vehicle.is_inside,
+            is_blocked=vehicle.is_blocked,
             last_seen=vehicle.last_seen,
             last_camera_id=vehicle.last_camera_id,
         )

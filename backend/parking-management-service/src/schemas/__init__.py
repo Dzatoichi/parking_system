@@ -18,6 +18,7 @@ from .vehicle_schemas import (
     BoundingBox,
     VehicleCreate,
     VehicleRead,
+    VehicleBlockUpdate,
     VehicleLocationUpdate,
     TrackingTaskCreate,
     TrackingTaskRead,
@@ -35,6 +36,7 @@ __all__ = [
     "SpotRead", "SpotReadShort",
     "CameraCreate", "CameraUpdate", "CameraRead", "CameraNetworkRead",
     "BoundingBox", "VehicleCreate", "VehicleRead", "VehicleLocationUpdate",
+    "VehicleBlockUpdate",
     "TrackingTaskCreate", "TrackingTaskRead", "TrackingEventRead",
     "VehicleRouteRead", "VehicleFullInfo", "VehicleDurationRead",
 ]

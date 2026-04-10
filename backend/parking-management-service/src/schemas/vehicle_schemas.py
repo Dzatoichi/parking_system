@@ -55,8 +55,15 @@ class VehicleRead(BaseSchema):
     id: int
     plate_number: str
     is_inside: bool
+    is_blocked: bool
     last_seen: Optional[datetime]
     last_camera_id: Optional[int]
+
+
+class VehicleBlockUpdate(BaseSchema):
+    blocked: bool = Field(
+        description="True — запретить въезд, False — снять запрет",
+    )
 
 
 class VehicleLocationUpdate(BaseSchema):
