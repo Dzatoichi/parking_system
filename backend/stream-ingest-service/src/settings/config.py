@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     APP_TITLE: str = "Stream Ingest Service"
     CV_SERVICE_URL: str = "http://cv-processing-service:8001"
     CV_SERVICE_TIMEOUT_SECONDS: float = 10.0
+    AUTH_TOKEN: str
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

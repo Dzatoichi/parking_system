@@ -17,6 +17,7 @@ class IngestCreate(BaseSchema):
 
     camera_id: str = Field(..., min_length=1)
     stream_url: str = Field(..., min_length=1)
+    dev: str = Field(..., min_length=1)  # <- добавить это поле (dev из IPEYE)
     correlation_id: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
 
