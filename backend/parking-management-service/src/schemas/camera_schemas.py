@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import Field, field_validator, AnyUrl
+from pydantic import Field, field_validator
 from .base_schema import BaseSchema
 from src.models.status.camera_status import CameraStatus
 

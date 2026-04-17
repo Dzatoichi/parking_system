@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Optional
 from pydantic import Field, field_validator
+from pydantic import ValidationInfo
+
 from .base_schema import BaseSchema
 
 class BoundingBox(BaseSchema):
@@ -16,15 +18,17 @@ class BoundingBox(BaseSchema):
 
     @field_validator("x2")
     @classmethod
-    def x2_gt_x1(cls, v: float, info) -> float:
-        if "x1" in info.data and v <= info.data["x1"]:
-            raise ValueError("x2 должно быть больше x1")
+    def x2_gt_x1(cls, v: float, info: ValidationInfo) -> float:
+        x1 = info.data.get("x1")
+        if x1 is not None and v <= x1:
+            raise ValueError("x2 must be greater than x1")
         return v
 
     @field_validator("y2")
     @classmethod
-    def y2_gt_y1(cls, v: float, info) -> float:
-        if "y1" in info.data and v <= info.data["y1"]:
+    def y2_gt_y1(cls, v: float, info: ValidationInfo) -> float:
+        y1 = info.data.get("y1")
+        if "y1" in info.data and v <= y1:
             raise ValueError("y2 должно быть больше y1")
         return v
 
@@ -77,7 +81,7 @@ class VehicleLocationUpdate(BaseSchema):
     plate_number: str = Field(min_length=3, max_length=12)
     camera_id: int
     bbox: BoundingBox
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime
     event_type: str = Field(
         pattern=r"^(enter|exit|pass|park|leave_spot)$",
         description="enter — въезд, exit — выезд, pass — проехал мимо, park — встал, leave_spot — уехал с места",
@@ -87,13 +91,11 @@ class VehicleLocationUpdate(BaseSchema):
         default=None,
         description="Заполняется, если event_type=park или leave_spot",
     )
-    features: Optional[list[float]] = Field(
+    features: list[float] | None = Field(
         default=None,
         min_length=512,
         max_length=512,
-        description="ReID-вектор от OSNet (обновляет pgvector)",
     )
-
 
 # ───────────────────────────────────────────────
 # TRACKING

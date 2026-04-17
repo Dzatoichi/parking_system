@@ -14,6 +14,14 @@ from .spot_schemas import (
     SpotReadShort,
 )
 from .camera_schemas import CameraCreate, CameraUpdate, CameraRead, CameraNetworkRead
+from .analytics_schemas import (
+    HourlyTrafficPoint,
+    WeeklyOccupancyPoint,
+    DurationBucket,
+    RecentEvent,
+    MiniSpot,
+    AnalyticsOverview,
+)
 from .vehicle_schemas import (
     BoundingBox,
     VehicleCreate,
@@ -35,6 +43,8 @@ __all__ = [
     "SpotCoordinates", "SpotCreate", "SpotStatusUpdate", "SpotCoordinatesUpdate",
     "SpotRead", "SpotReadShort",
     "CameraCreate", "CameraUpdate", "CameraRead", "CameraNetworkRead",
+    "HourlyTrafficPoint", "WeeklyOccupancyPoint", "DurationBucket",
+    "RecentEvent", "MiniSpot", "AnalyticsOverview",
     "BoundingBox", "VehicleCreate", "VehicleRead", "VehicleLocationUpdate",
     "VehicleBlockUpdate",
     "TrackingTaskCreate", "TrackingTaskRead", "TrackingEventRead",

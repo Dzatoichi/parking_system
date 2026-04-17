@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from src.dao.spot_dao import SpotsDAO
+from src.dao.spot_dao import SpotDAO
 from src.models.spots import Spot
 from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
@@ -33,7 +33,7 @@ class SpotService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._dao = SpotsDAO(session)
+        self._dao = SpotDAO(session)
         self._parking_dao = ParkingDAO(session)
 
     async def get_spot(self, spot_id: int) -> SpotRead:
