@@ -25,10 +25,3 @@ app.include_router(booking_router)
 async def app_startup_seed() -> None:
     await seed_demo_data()
 
-@app.get("/__debug_openapi")
-def debug_openapi():
-    return get_openapi(
-        title="debug",
-        version="1.0",
-        routes=app.routes,
-    )

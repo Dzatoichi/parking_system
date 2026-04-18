@@ -1,45 +1,74 @@
-import requests
-import time
+"""
+Headless stream ingestion helpers.
+"""
+
+import asyncio
+from typing import Final
+
 import cv2
+import httpx
 import numpy as np
-from datetime import datetime
+
+from src.clients.cv_client import CVServiceClient
 
 
-def simple_frame_capture():
-    """Максимально простая функция захвата"""
-    devcode = "cd248268492540d5adf3fe86b3d1bd84"
-
-    # Прямой URL без API
-    url = f"http://sr-171-25-235-75.ipeye.ru/{devcode}/img.jpeg"
-
-    while True:
-        try:
-            # Простой GET запрос
-            response = requests.get(url, timeout=5)
-
-            if response.status_code == 200:
-                # Конвертируем в изображение
-                img_array = np.frombuffer(response.content, np.uint8)
-                frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-                if frame is not None:
-                    # Показываем
-                    cv2.imshow("Camera", frame)
-
-                    # Добавляем время
-                    cv2.putText(frame, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-            # Ждем 0.1 секунды (~10 FPS)
-            if cv2.waitKey(100) & 0xFF == ord('q'):
-                break
-
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            time.sleep(2)
-
-    cv2.destroyAllWindows()
+FRAME_PULL_TIMEOUT_SECONDS: Final[float] = 10.0
+FRAME_PUSH_INTERVAL_SECONDS: Final[float] = 0.25
+RETRY_DELAY_SECONDS: Final[float] = 2.0
 
 
-if __name__ == "__main__":
-    simple_frame_capture()
+def _build_snapshot_url(server_ip: str, dev: str) -> str:
+    return f"http://{server_ip}/{dev}/img.jpeg"
+
+
+async def _fetch_snapshot_bytes(
+    client: httpx.AsyncClient,
+    server_ip: str,
+    dev: str,
+) -> bytes:
+    response = await client.get(_build_snapshot_url(server_ip, dev))
+    response.raise_for_status()
+    return response.content
+
+
+def _normalize_frame(raw_bytes: bytes) -> bytes | None:
+    frame_array = np.frombuffer(raw_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+    if frame is None:
+        return None
+
+    ok, encoded = cv2.imencode(".jpg", frame)
+    if not ok:
+        return None
+    return encoded.tobytes()
+
+
+async def run_stream(
+    cv_job_id: str,
+    dev: str,
+    server_ip: str,
+    cv_client: CVServiceClient,
+    stop_event: asyncio.Event,
+) -> None:
+    """
+    Pulls JPEG snapshots from the camera endpoint and forwards frames to CV service.
+    Designed to fail softly: temporary network/camera problems should not crash the API.
+    """
+    timeout = httpx.Timeout(FRAME_PULL_TIMEOUT_SECONDS)
+    async with httpx.AsyncClient(timeout=timeout) as snapshot_client:
+        while not stop_event.is_set():
+            try:
+                snapshot_bytes = await _fetch_snapshot_bytes(snapshot_client, server_ip, dev)
+                frame_bytes = _normalize_frame(snapshot_bytes)
+                if frame_bytes is not None:
+                    await cv_client.push_frame(cv_job_id, frame_bytes)
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=FRAME_PUSH_INTERVAL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                continue
+            except httpx.HTTPError:
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
+            except Exception:
+                await asyncio.sleep(RETRY_DELAY_SECONDS)

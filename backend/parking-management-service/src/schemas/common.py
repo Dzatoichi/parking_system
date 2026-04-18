@@ -1,13 +1,12 @@
 from typing import TypeVar, Generic, Optional, Any
-from pydantic import Field, ConfigDict
-from pydantic.generics import GenericModel
+from pydantic import BaseModel, Field, ConfigDict
 
 from .base_schema import BaseSchema
 
 T = TypeVar("T")
 
 
-class PaginatedResponse(GenericModel, Generic[T]):
+class PaginatedResponse(BaseModel, Generic[T]):
     """
     Универсальная обёртка для списков с пагинацией.
 

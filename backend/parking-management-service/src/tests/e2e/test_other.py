@@ -43,7 +43,7 @@ async def parking_client(session) -> AsyncClient:
 @pytest_asyncio.fixture
 async def cameras_client(session) -> AsyncClient:
     app = FastAPI()
-    app.include_router(cameras_router)
+    app.include_router(camera_router)
     app.dependency_overrides[get_camera_service] = lambda: CameraService(session)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
@@ -52,7 +52,7 @@ async def cameras_client(session) -> AsyncClient:
 @pytest_asyncio.fixture
 async def vehicles_client(session) -> AsyncClient:
     app = FastAPI()
-    app.include_router(vehicles_router)
+    app.include_router(vehicle_router)
     app.dependency_overrides[get_vehicle_service] = lambda: VehicleService(session)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

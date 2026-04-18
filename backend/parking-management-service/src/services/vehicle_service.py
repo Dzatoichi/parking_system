@@ -210,8 +210,8 @@ class VehicleService:
         return VehicleRead(
             id=vehicle.id,
             plate_number=vehicle.plate_number,
-            is_inside=vehicle.is_inside,
-            is_blocked=vehicle.is_blocked,
+            is_inside=bool(vehicle.is_inside),
+            is_blocked=bool(getattr(vehicle, "is_blocked", False) or False),
             last_seen=vehicle.last_seen,
             last_camera_id=vehicle.last_camera_id,
         )

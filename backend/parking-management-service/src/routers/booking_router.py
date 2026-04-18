@@ -1,9 +1,15 @@
-from fastapi import APIRouter, status, Query, Depends
 from datetime import datetime
+
+from fastapi import APIRouter, Query, status
+
 from src.schemas.booking_schemas import (
-    BookingCreate, BookingRead, BookingUpdate, BookingListResponse
+    AvailableSpotInfo,
+    BookingCreate,
+    BookingListResponse,
+    BookingRead,
+    BookingUpdate,
 )
-from src.utils.dependencies import get_booking_service
+from src.utils.dependencies import BookingServiceDep
 
 booking_router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -12,11 +18,11 @@ booking_router = APIRouter(prefix="/bookings", tags=["bookings"])
     "",
     response_model=BookingRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Создать бронирование"
+    summary="Создать бронирование",
 )
 async def create_booking(
-        body: BookingCreate,
-        service=Depends(get_booking_service)
+    body: BookingCreate,
+    service: BookingServiceDep,
 ) -> BookingRead:
     return await service.create_booking(body)
 
@@ -24,13 +30,13 @@ async def create_booking(
 @booking_router.get(
     "/{user_id}",
     response_model=BookingListResponse,
-    summary="Получить бронирования пользователя"
+    summary="Получить бронирования пользователя",
 )
 async def get_user_bookings(
-        user_id: int,
-        page: int = Query(1, ge=1),
-        size: int = Query(20, ge=1, le=100),
-        service=Depends(get_booking_service)
+    user_id: int,
+    service: BookingServiceDep,
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
 ) -> BookingListResponse:
     return await service.get_user_bookings(user_id, page, size)
 
@@ -38,11 +44,11 @@ async def get_user_bookings(
 @booking_router.get(
     "/detail/{booking_id}",
     response_model=BookingRead,
-    summary="Получить детали бронирования"
+    summary="Получить детали бронирования",
 )
 async def get_booking(
-        booking_id: int,
-        service=Depends(get_booking_service)
+    booking_id: int,
+    service: BookingServiceDep,
 ) -> BookingRead:
     return await service.get_booking(booking_id)
 
@@ -50,30 +56,25 @@ async def get_booking(
 @booking_router.patch(
     "/{booking_id}",
     response_model=BookingRead,
-    summary="Отменить/обновить бронирование"
+    summary="Обновить статус или метаданные бронирования",
 )
 async def update_booking(
-        booking_id: int,
-        body: BookingUpdate,
-        service=Depends(get_booking_service)
+    booking_id: int,
+    body: BookingUpdate,
+    service: BookingServiceDep,
 ) -> BookingRead:
-    if body.status:
-        if body.status.value == "cancelled":
-            return await service.cancel_booking(booking_id, body.cancellation_reason)
-        elif body.status.value == "confirmed":
-            return await service.confirm_booking(booking_id)
-
-    return await service.get_booking(booking_id)
+    return await service.update_booking(booking_id, body)
 
 
 @booking_router.get(
     "",
-    summary="Получить доступные места для бронирования"
+    response_model=list[AvailableSpotInfo],
+    summary="Получить доступные места для бронирования",
 )
 async def get_available_spots(
-        parking_id: int,
-        start_time: datetime = Query(...),
-        end_time: datetime = Query(...),
-        service=Depends(get_booking_service)
-):
+    parking_id: int,
+    service: BookingServiceDep,
+    start_time: datetime = Query(...),
+    end_time: datetime = Query(...),
+) -> list[AvailableSpotInfo]:
     return await service.get_available_spots(parking_id, start_time, end_time)

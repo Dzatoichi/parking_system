@@ -1,97 +1,77 @@
-from datetime import datetime
-from sqlalchemy import select, and_, or_
+from datetime import datetime, timezone
+
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.booking import Booking, BookingStatus
-from src.dao.base_dao import BaseDAO
+
+from src.models.booking import Booking
+from src.models.status.booking_status import BookingStatus
 
 
-class BookingDAO(BaseDAO):
-    model = Booking
+class BookingDAO:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_id(self, booking_id: int) -> Booking | None:
+        result = await self._session.execute(
+            select(Booking).where(Booking.id == booking_id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_user_bookings(
-            self,
-            session: AsyncSession,
-            user_id: int,
-            status_filter: BookingStatus = None,
-            skip: int = 0,
-            limit: int = 50
-    ) -> list[Booking]:
-        query = select(self.model).where(
-            self.model.user_id == user_id
+        self,
+        user_id: int,
+        status_filter: BookingStatus | None = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[Booking], int]:
+        query = select(Booking).where(Booking.user_id == user_id)
+        count_query = select(func.count(Booking.id)).where(Booking.user_id == user_id)
+
+        if status_filter is not None:
+            query = query.where(Booking.status == status_filter)
+            count_query = count_query.where(Booking.status == status_filter)
+
+        rows = await self._session.execute(
+            query.order_by(Booking.start_time.desc()).offset(offset).limit(limit)
         )
+        total = await self._session.execute(count_query)
+        return list(rows.scalars().all()), total.scalar_one()
 
-        if status_filter:
-            query = query.where(self.model.status == status_filter)
-
-        query = query.order_by(self.model.start_time.desc())
-        query = query.offset(skip).limit(limit)
-
-        result = await session.execute(query)
-        return result.scalars().all()
-
-    async def get_spot_conflicting_bookings(
-            self,
-            session: AsyncSession,
-            spot_id: int,
-            start_time: datetime,
-            end_time: datetime,
-            exclude_booking_id: int = None
+    async def get_conflicting_bookings(
+        self,
+        spot_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        exclude_booking_id: int | None = None,
     ) -> list[Booking]:
-
-        query = select(self.model).where(
+        query = select(Booking).where(
             and_(
-                self.model.spot_id == spot_id,
-                self.model.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED]),
-                self.model.start_time < end_time,
-                self.model.end_time > start_time
+                Booking.spot_id == spot_id,
+                Booking.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED]),
+                Booking.start_time < end_time,
+                Booking.end_time > start_time,
             )
         )
 
-        if exclude_booking_id:
-            query = query.where(self.model.id != exclude_booking_id)
+        if exclude_booking_id is not None:
+            query = query.where(Booking.id != exclude_booking_id)
 
-        result = await session.execute(query)
-        return result.scalars().all()
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
 
-    async def get_parking_bookings_in_period(
-            self,
-            session: AsyncSession,
-            parking_id: int,
-            start_time: datetime,
-            end_time: datetime,
-            status_filter: BookingStatus = None
+    async def get_active_for_spot(
+        self,
+        spot_id: int,
+        now: datetime | None = None,
     ) -> list[Booking]:
-        from src.models.spots import Spot
-
-        query = select(self.model).join(
-            Spot
-        ).where(
-            and_(
-                Spot.parking_id == parking_id,
-                self.model.start_time < end_time,
-                self.model.end_time > start_time
+        current_time = now or datetime.now(tz=timezone.utc)
+        result = await self._session.execute(
+            select(Booking).where(
+                and_(
+                    Booking.spot_id == spot_id,
+                    Booking.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED]),
+                    Booking.end_time > current_time,
+                )
             )
         )
-
-        if status_filter:
-            query = query.where(self.model.status == status_filter)
-
-        result = await session.execute(query)
-        return result.scalars().all()
-
-    async def get_user_active_bookings(
-            self,
-            session: AsyncSession,
-            user_id: int
-    ) -> list[Booking]:
-        now = datetime.utcnow()
-        query = select(self.model).where(
-            and_(
-                self.model.user_id == user_id,
-                self.model.status.in_([BookingStatus.PENDING, BookingStatus.CONFIRMED]),
-                self.model.start_time <= now,
-                self.model.end_time > now
-            )
-        )
-        result = await session.execute(query)
-        return result.scalars().all()
+        return list(result.scalars().all())

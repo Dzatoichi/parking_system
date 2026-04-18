@@ -1,173 +1,205 @@
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime, timezone
+
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.dao.booking_dao import BookingDAO
+from src.dao.parking_dao import ParkingDAO
 from src.dao.spot_dao import SpotDAO
-from src.models.booking import Booking, BookingStatus
+from src.models.booking import Booking
+from src.models.status.booking_status import BookingStatus
 from src.models.status.spot_status import SpotStatus
 from src.schemas.booking_schemas import (
-    BookingCreate, BookingRead, BookingUpdate, BookingListResponse,
-    AvailableSpotInfo
+    AvailableSpotInfo,
+    BookingCreate,
+    BookingListResponse,
+    BookingRead,
+    BookingUpdate,
 )
 
 
 class BookingService:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-        self.booking_dao = BookingDAO()
-        self.spot_dao = SpotDAO(session)
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._booking_dao = BookingDAO(session)
+        self._spot_dao = SpotDAO(session)
+        self._parking_dao = ParkingDAO(session)
 
-    async def create_booking(
-            self,
-            booking_create: BookingCreate
-    ) -> BookingRead:
+    async def create_booking(self, booking_create: BookingCreate) -> BookingRead:
+        spot = await self._spot_dao.get_by_id(booking_create.spot_id)
+        if spot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Место с id={booking_create.spot_id} не найдено",
+            )
 
+        if spot.spot_status == SpotStatus.OCCUPIED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Нельзя забронировать уже занятое место",
+            )
 
-        # 1. Проверить что место существует
-        spot = await self.spot_dao.get_by_id(booking_create.spot_id)
-        if not spot:
-            raise ValueError(f"Место {booking_create.spot_id} не найдено")
-
-        # 2. Проверить что место не забронировано
-        conflicts = await self.booking_dao.get_spot_conflicting_bookings(
-            self.session,
+        conflicts = await self._booking_dao.get_conflicting_bookings(
             booking_create.spot_id,
             booking_create.start_time,
-            booking_create.end_time
+            booking_create.end_time,
         )
         if conflicts:
-            raise ValueError(f"Место уже забронировано на этот период")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Место уже забронировано на этот период",
+            )
 
-        # 3. Создать бронирование
         booking = Booking(
             user_id=booking_create.user_id,
             spot_id=booking_create.spot_id,
             start_time=booking_create.start_time,
             end_time=booking_create.end_time,
-            status=BookingStatus.PENDING
+            status=BookingStatus.PENDING,
         )
 
-        self.session.add(booking)
-        await self.session.commit()
-        await self.session.refresh(booking)
+        self._session.add(booking)
+        await self._spot_dao.update_status(spot.id, SpotStatus.RESERVED, vehicle_id=None)
+        await self._sync_parking_available_spots(spot.parking_id)
+        await self._session.commit()
+        await self._session.refresh(booking)
 
-        return BookingRead.from_orm(booking)
+        return BookingRead.model_validate(booking)
 
     async def get_booking(self, booking_id: int) -> BookingRead:
-        booking = await self.booking_dao.get(self.session, booking_id)
-        if not booking:
-            raise ValueError(f"Бронирование {booking_id} не найдено")
-        return BookingRead.from_orm(booking)
+        booking = await self._get_booking_or_404(booking_id)
+        return BookingRead.model_validate(booking)
 
     async def get_user_bookings(
-            self,
-            user_id: int,
-            page: int = 1,
-            size: int = 20
+        self,
+        user_id: int,
+        page: int = 1,
+        size: int = 20,
     ) -> BookingListResponse:
-        skip = (page - 1) * size
-        bookings = await self.booking_dao.get_user_bookings(
-            self.session,
+        offset = (page - 1) * size
+        bookings, total = await self._booking_dao.get_user_bookings(
             user_id,
-            skip=skip,
-            limit=size
+            offset=offset,
+            limit=size,
         )
-
-        # Получить всего для подсчета страниц
-        all_bookings = await self.booking_dao.get_user_bookings(
-            self.session,
-            user_id,
-            skip=0,
-            limit=99999
-        )
-
-        total = len(all_bookings)
-        pages = (total + size - 1) // size
-
-        return BookingListResponse(
-            bookings=[BookingRead.from_orm(b) for b in bookings],
+        return BookingListResponse.create(
+            items=[BookingRead.model_validate(item) for item in bookings],
             total=total,
             page=page,
             size=size,
-            pages=pages
         )
 
     async def get_available_spots(
-            self,
-            parking_id: int,
-            start_time: datetime,
-            end_time: datetime
-    ) -> List[AvailableSpotInfo]:
-
-        # Получить все места парковки
-        all_spots = await self.spot_dao.get_spots_by_parking(
-            self.session,
-            parking_id
+        self,
+        parking_id: int,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[AvailableSpotInfo]:
+        spots, _ = await self._spot_dao.get_by_parking(
+            parking_id=parking_id,
+            offset=0,
+            limit=1000,
         )
 
-        available_spots = []
-
-        for spot in all_spots:
-            # Пропустить занятые места
-            if spot.status == SpotStatus.OCCUPIED:
+        available_spots: list[AvailableSpotInfo] = []
+        for spot in spots:
+            if spot.spot_status == SpotStatus.OCCUPIED:
                 continue
 
-            # Проверить конфликты бронирований
-            conflicts = await self.booking_dao.get_spot_conflicting_bookings(
-                self.session,
+            conflicts = await self._booking_dao.get_conflicting_bookings(
                 spot.id,
                 start_time,
-                end_time
+                end_time,
             )
+            if conflicts:
+                continue
 
-            if not conflicts:
-                available_spots.append(
-                    AvailableSpotInfo(
-                        spot_id=spot.id,
-                        parking_id=spot.parking_id,
-                        spot_number=spot.spot_number,
-                        spot_type=spot.spot_type.value if spot.spot_type else None,
-                        coordinates=spot.coordinates
-                    )
+            available_spots.append(
+                AvailableSpotInfo(
+                    spot_id=spot.id,
+                    parking_id=spot.parking_id,
+                    spot_number=spot.spot_number,
+                    spot_type=spot.spot_type,
+                    current_status=spot.spot_status,
+                    spot_coordinates=spot.spot_coordinates,
+                    available_from=start_time,
+                    available_until=end_time,
                 )
+            )
 
         return available_spots
 
-    async def cancel_booking(
-            self,
-            booking_id: int,
-            reason: Optional[str] = None
+    async def update_booking(
+        self,
+        booking_id: int,
+        data: BookingUpdate,
     ) -> BookingRead:
-        booking = await self.booking_dao.get(self.session, booking_id)
-        if not booking:
-            raise ValueError(f"Бронирование {booking_id} не найдено")
+        booking = await self._get_booking_or_404(booking_id)
+        previous_status = booking.status
 
-        if booking.status == BookingStatus.CANCELLED:
-            raise ValueError("Бронирование уже отменено")
+        if data.notes is not None:
+            booking.notes = data.notes
 
-        booking.status = BookingStatus.CANCELLED
-        booking.cancellation_reason = reason
-        booking.updated_at = datetime.utcnow()
+        if data.status is not None:
+            if data.status == BookingStatus.CONFIRMED:
+                if booking.status != BookingStatus.PENDING:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Подтвердить можно только booking в статусе pending",
+                    )
+                booking.status = BookingStatus.CONFIRMED
+            elif data.status in {
+                BookingStatus.CANCELLED,
+                BookingStatus.COMPLETED,
+                BookingStatus.EXPIRED,
+            }:
+                if booking.status in {
+                    BookingStatus.CANCELLED,
+                    BookingStatus.COMPLETED,
+                    BookingStatus.EXPIRED,
+                }:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Бронирование уже завершено или отменено",
+                    )
+                booking.status = data.status
+                if data.status == BookingStatus.CANCELLED:
+                    booking.cancellation_reason = data.cancellation_reason
+            elif data.status == BookingStatus.PENDING and booking.status != BookingStatus.PENDING:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Нельзя вернуть booking обратно в pending",
+                )
 
-        self.session.add(booking)
-        await self.session.commit()
-        await self.session.refresh(booking)
+        booking.updated_at = datetime.now(tz=timezone.utc)
+        self._session.add(booking)
 
-        return BookingRead.from_orm(booking)
+        if previous_status != booking.status:
+            await self._sync_spot_status_after_booking_change(booking.spot_id)
 
-    async def confirm_booking(self, booking_id: int) -> BookingRead:
-        booking = await self.booking_dao.get(self.session, booking_id)
-        if not booking:
-            raise ValueError(f"Бронирование {booking_id} не найдено")
+        await self._session.commit()
+        await self._session.refresh(booking)
+        return BookingRead.model_validate(booking)
 
-        if booking.status != BookingStatus.PENDING:
-            raise ValueError(f"Только PENDING бронирования могут быть подтверждены")
+    async def _get_booking_or_404(self, booking_id: int) -> Booking:
+        booking = await self._booking_dao.get_by_id(booking_id)
+        if booking is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Бронирование с id={booking_id} не найдено",
+            )
+        return booking
 
-        booking.status = BookingStatus.CONFIRMED
-        booking.updated_at = datetime.utcnow()
+    async def _sync_spot_status_after_booking_change(self, spot_id: int) -> None:
+        spot = await self._spot_dao.get_by_id(spot_id)
+        if spot is None or spot.spot_status == SpotStatus.OCCUPIED:
+            return
 
-        self.session.add(booking)
-        await self.session.commit()
-        await self.session.refresh(booking)
+        active_bookings = await self._booking_dao.get_active_for_spot(spot_id)
+        new_status = SpotStatus.RESERVED if active_bookings else SpotStatus.FREE
+        await self._spot_dao.update_status(spot_id, new_status, vehicle_id=spot.current_vehicle_id)
+        await self._sync_parking_available_spots(spot.parking_id)
 
-        return BookingRead.from_orm(booking)
+    async def _sync_parking_available_spots(self, parking_id: int) -> None:
+        stats = await self._spot_dao.get_stats(parking_id)
+        await self._parking_dao.update(parking_id, {"available_spots": stats["free"]})

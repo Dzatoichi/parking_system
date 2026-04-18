@@ -13,6 +13,7 @@ from src.models.parkings import ParkingBase # noqa: F401
 from src.models.cameras import Cameras      # noqa: F401
 from src.models.vehicles import Vehicles    # noqa: F401
 from src.models.tracking import Tracking    # noqa: F401
+from src.models.booking import Booking      # noqa: F401
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 

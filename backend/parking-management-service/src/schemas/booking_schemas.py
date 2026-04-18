@@ -1,41 +1,42 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
-from pydantic import field_validator
-from enum import Enum
 
+from pydantic import Field, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
+from src.models.status.booking_status import BookingStatus
+from src.models.status.spot_status import SpotStatus
+from src.models.type.spot_type import SpotType
+from src.schemas.base_schema import BaseSchema
+from src.schemas.common import PaginatedResponse
+from src.schemas.spot_schemas import SpotCoordinates
 
-class BookingStatus(str, Enum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
-    EXPIRED = "expired"
 
-
-class BookingCreate(BaseModel):
-    user_id: int = Field(..., gt=0, description="ID пользователя")
-    spot_id: int = Field(..., gt=0, description="ID парковочного места")
-    start_time: datetime = Field(..., description="Начало бронирования")
-    end_time: datetime = Field(..., description="Конец бронирования")
+class BookingCreate(BaseSchema):
+    user_id: int = Field(..., gt=0, description="ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ")
+    spot_id: int = Field(..., gt=0, description="ID РїР°СЂРєРѕРІРѕС‡РЅРѕРіРѕ РјРµСЃС‚Р°")
+    start_time: datetime = Field(..., description="РќР°С‡Р°Р»Рѕ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ")
+    end_time: datetime = Field(..., description="РљРѕРЅРµС† Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ")
 
     @field_validator("end_time")
     @classmethod
-    def end_time_after_start(cls, v, info: ValidationInfo):
+    def end_time_after_start(cls, value: datetime, info: ValidationInfo) -> datetime:
         start_time = info.data.get("start_time")
-        if start_time and v <= start_time:
-            raise ValueError("end_time должен быть позже start_time")
-        return v
+        if start_time and value <= start_time:
+            raise ValueError("end_time РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїРѕР·Р¶Рµ start_time")
+        return value
 
 
-class BookingUpdate(BaseModel):
-    status: BookingStatus = Field(None, description="Новый статус")
-    notes: str = Field(None, max_length=500)
-    cancellation_reason: str = Field(None, max_length=500, description="Причина отмены")
+class BookingUpdate(BaseSchema):
+    status: BookingStatus | None = Field(default=None, description="РќРѕРІС‹Р№ СЃС‚Р°С‚СѓСЃ")
+    notes: str | None = Field(default=None, max_length=500)
+    cancellation_reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="РџСЂРёС‡РёРЅР° РѕС‚РјРµРЅС‹",
+    )
 
 
-class BookingRead(BaseModel):
+class BookingRead(BaseSchema):
     id: int
     user_id: int
     spot_id: int
@@ -44,31 +45,25 @@ class BookingRead(BaseModel):
     status: BookingStatus
     created_at: datetime
     updated_at: datetime
-    notes: str = None
-    cancellation_reason: str = None
-
-    class Config:
-        from_attributes = True
+    notes: str | None = None
+    cancellation_reason: str | None = None
 
 
-class BookingListResponse(BaseModel):
-    bookings: list[BookingRead]
-    total: int
-    page: int
-    size: int
-    pages: int
+class BookingListResponse(PaginatedResponse[BookingRead]):
+    pass
 
 
-class AvailableSpotInfo(BaseModel):
+class AvailableSpotInfo(BaseSchema):
     spot_id: int
     parking_id: int
-    spot_number: int
-    spot_type: str
-    coordinates: dict = None
-    available_from: datetime = None
-    available_until: datetime = None
+    spot_number: str
+    spot_type: SpotType
+    current_status: SpotStatus
+    spot_coordinates: SpotCoordinates
+    available_from: datetime | None = None
+    available_until: datetime | None = None
 
 
-class BookingConflict(BaseModel):
+class BookingConflict(BaseSchema):
     spot_id: int
     conflicts: list[BookingRead]
