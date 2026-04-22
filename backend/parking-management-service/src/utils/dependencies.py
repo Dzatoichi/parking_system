@@ -11,10 +11,12 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.base import db_helper
+from src.services.booking_service import BookingService
 from src.services.spot_service import SpotService
 from src.services.parking_service import ParkingService
 from src.services.camera_service import CameraService
 from src.services.vehicle_service import VehicleService
+from src.services.analytics_service import AnalyticsService
 
 
 # 1. Сессия БД
@@ -38,9 +40,17 @@ def get_camera_service(session: SessionDep) -> CameraService:
 def get_vehicle_service(session: SessionDep) -> VehicleService:
     return VehicleService(session)
 
+def get_analytics_service(session: SessionDep) -> AnalyticsService:
+    return AnalyticsService(session)
+
+async def get_booking_service(session: SessionDep) -> BookingService:
+    return BookingService(session)
+
 
 # 3. Annotated-алиасы — используются как типы в роутерах
 SpotServiceDep    = Annotated[SpotService,    Depends(get_spot_service)]
 ParkingServiceDep = Annotated[ParkingService, Depends(get_parking_service)]
 CameraServiceDep  = Annotated[CameraService,  Depends(get_camera_service)]
 VehicleServiceDep = Annotated[VehicleService, Depends(get_vehicle_service)]
+AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
+BookingServiceDep = Annotated[BookingService, Depends(get_booking_service)]

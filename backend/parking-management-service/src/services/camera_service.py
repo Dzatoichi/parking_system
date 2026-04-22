@@ -112,7 +112,7 @@ class CameraService:
             status=camera.status,
             position_x=camera.position_x,
             position_y=camera.position_y,
-            is_calibrated=getattr(camera, "is_calibrated", False),
+            is_calibrated=bool(getattr(camera, "is_calibrated", False) or False),
             parking_id=camera.parking_id,
-            monitored_spot_ids=[],  # M2M — загружается отдельно если нужно
+            monitored_spot_ids=getattr(camera, "monitored_spot_ids", []) or [],
         )

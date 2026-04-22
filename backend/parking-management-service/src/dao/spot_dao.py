@@ -9,7 +9,7 @@ from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
 
 
-class SpotsDAO:
+class SpotDAO:
     """
     Data Access Object — весь SQL для работы с парковочными местами.
     """

@@ -26,18 +26,11 @@ export function Analytics() {
     return () => clearInterval(timer);
   }, []);
 
-  const durationData = [
-    { name: '< 1 часа', value: 25, color: '#16a34a' },
-    { name: '1-3 часа', value: 45, color: '#2563eb' },
-    { name: '3-6 часов', value: 20, color: '#f59e0b' },
-    { name: '> 6 часов', value: 10, color: '#dc2626' },
-  ];
-
-  const metrics = [
-    { label: 'Ср. длительность', value: '2.5ч', change: '+5%', icon: Clock, color: 'text-blue-600' },
-    { label: 'Пик заполненности', value: '96%', change: '+3%', icon: TrendingUp, color: 'text-purple-600' },
-    { label: 'Уникальных посетителей', value: '234', change: '+8%', icon: Users, color: 'text-orange-600' },
-  ];
+  const metrics = useMemo(() => [
+    { label: 'Ср. длительность', value: `${Math.round((analytics?.avg_duration_minutes ?? 0) / 60 * 10) / 10}ч`, change: '', icon: Clock, color: 'text-blue-600' },
+    { label: 'Пик заполненности', value: `${Math.round(analytics?.peak_occupancy_percent ?? 0)}%`, change: '', icon: TrendingUp, color: 'text-purple-600' },
+    { label: 'Уникальных посетителей', value: String(analytics?.unique_visitors_week ?? 0), change: '', icon: Users, color: 'text-orange-600' },
+  ], [analytics]);
 
   return (
     <div className="space-y-6">

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query, status
 from src.schemas import (
     VehicleCreate,
     VehicleRead,
+    VehicleBlockUpdate,
     VehicleLocationUpdate,
     VehicleRouteRead,
     VehicleFullInfo,
@@ -37,6 +38,15 @@ async def get_vehicle_by_plate(
     service: VehicleServiceDep,
 ) -> VehicleRead:
     return await service.get_vehicle_by_plate(plate_number)
+
+
+@vehicle_router.patch("/by-plate/{plate_number}/block", response_model=VehicleRead)
+async def block_vehicle_by_plate(
+    plate_number: str,
+    body: VehicleBlockUpdate,
+    service: VehicleServiceDep,
+) -> VehicleRead:
+    return await service.set_vehicle_block_by_plate(plate_number, body)
 
 
 @vehicle_router.post("", response_model=VehicleRead, status_code=status.HTTP_201_CREATED)

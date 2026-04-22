@@ -2,7 +2,7 @@
 HTTP-роутер для операций с CV задачами.
 """
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from src.api.schemas import CVJobCreate, CVJobRead
 from src.api.utils.dependencies import CVJobServiceDep
@@ -35,3 +35,11 @@ async def stop_job(
 ) -> CVJobRead:
     """Останавливает CV задачу."""
     return await service.stop_job(job_id)
+
+
+@cv_job_router.post("/{job_id}/frame")
+async def push_frame(job_id: str, request: Request) -> dict:
+    """Принимает JPEG кадр от stream-ingest-service."""
+    body = await request.body()
+    print(f"📷 Получен кадр для job {job_id}, размер: {len(body)} байт")
+    return {"ok": True}

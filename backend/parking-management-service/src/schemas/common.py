@@ -1,11 +1,12 @@
 from typing import TypeVar, Generic, Optional, Any
-from pydantic import Field
+from pydantic import BaseModel, Field, ConfigDict
+
 from .base_schema import BaseSchema
 
 T = TypeVar("T")
 
 
-class PaginatedResponse(BaseSchema, Generic[T]):
+class PaginatedResponse(BaseModel, Generic[T]):
     """
     Универсальная обёртка для списков с пагинацией.
 
@@ -26,6 +27,7 @@ class PaginatedResponse(BaseSchema, Generic[T]):
         pages = (total + size - 1) // size if size > 0 else 1
         return cls(items=items, total=total, page=page, size=size, pages=pages)
 
+    model_config = ConfigDict(from_attributes=True)
 
 class ErrorResponse(BaseSchema):
     """
@@ -39,7 +41,7 @@ class ErrorResponse(BaseSchema):
     """
     code: str = Field(description="Машиночитаемый код ошибки", examples=["SPOT_NOT_FOUND"])
     message: str = Field(description="Человекочитаемое сообщение")
-    details: Optional[Any] = Field(default=None, description="Доп. информация (валидационные ошибки и т.п.)")
+    details: Optional[dict] = Field(default=None, description="Доп. информация (валидационные ошибки и т.п.)")
 
 
 class SuccessResponse(BaseSchema):

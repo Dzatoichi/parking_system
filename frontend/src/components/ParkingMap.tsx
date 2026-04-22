@@ -1,38 +1,57 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Filter, MapPin } from 'lucide-react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { parkingApi, spotApi } from '../services/pmApi';
+import type { ParkingRead, SpotReadShort } from '../services/pmApi';
 
 export function ParkingMap() {
   const [filter, setFilter] = useState('all');
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [parking, setParking] = useState<ParkingRead | null>(null);
+  const [spots, setSpots] = useState<SpotReadShort[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Generate parking spots for 5x4 grid
-  const parkingSpots = Array.from({ length: 20 }, (_, i) => {
-    const row = String.fromCharCode(65 + Math.floor(i / 4)); // A, B, C, D, E
-    const col = (i % 4) + 1;
-    const isOccupied = Math.random() > 0.6;
-    const licensePlates = ['A123BC', 'C567DF', 'X891YZ', 'M456NP', 'K789QR', 'P234ST', 'Q567UV', 'R890WX'];
-    
-    return {
-      id: `${row}-${col}`,
-      row,
-      col,
-      status: isOccupied ? 'occupied' : Math.random() > 0.9 ? 'reserved' : 'free',
-      plate: isOccupied ? licensePlates[Math.floor(Math.random() * licensePlates.length)] : null,
-      entryTime: isOccupied ? new Date(Date.now() - Math.random() * 4 * 60 * 60 * 1000) : null
-    };
-  });
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const parkingRes = await parkingApi.getAll({ only_active: true, page: 1, size: 1 });
+      const firstParking = parkingRes.data.items[0];
+      if (!firstParking) {
+        setError("Нет активных парковок. Добавьте данные в БД.");
+        setSpots([]);
+        return;
+      }
+      setParking(firstParking);
+      const spotsRes = await spotApi.getByParking(firstParking.id, { page: 1, size: 200 });
+      setSpots(
+        spotsRes.data.items.map((spot) =>
+          spot.spot_status === 'reserved' ? { ...spot, spot_status: 'occupied' } : spot
+        )
+      );
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? e?.message ?? "Ошибка загрузки данных");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleRefresh = () => {
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const handleRefresh = async () => {
+    await loadData();
     setLastRefresh(new Date());
   };
 
-  const filteredSpots = parkingSpots.filter(spot => {
+  const filteredSpots = useMemo(() => spots.filter((spot) => {
     if (filter === 'all') return true;
-    return spot.status === filter;
-  });
+    return spot.spot_status === filter;
+  }), [filter, spots]);
 
   const getSpotColor = (status: string) => {
     switch (status) {
@@ -40,8 +59,6 @@ export function ParkingMap() {
         return 'bg-green-100 border-green-300 text-green-800';
       case 'occupied':
         return 'bg-red-100 border-red-300 text-red-800';
-      case 'reserved':
-        return 'bg-yellow-100 border-yellow-300 text-yellow-800';
       default:
         return 'bg-gray-100 border-gray-300 text-gray-800';
     }
@@ -52,7 +69,9 @@ export function ParkingMap() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Карта парковки</h1>
-          <p className="text-gray-600">Визуализация парковки в реальном времени</p>
+          <p className="text-gray-600">
+            {parking ? `${parking.name}, ${parking.address}` : 'Визуализация парковки в реальном времени'}
+          </p>
         </div>
         
         <div className="flex items-center space-x-4">
@@ -65,7 +84,6 @@ export function ParkingMap() {
               <SelectItem value="all">Все места</SelectItem>
               <SelectItem value="free">Только свободные</SelectItem>
               <SelectItem value="occupied">Только занятые</SelectItem>
-              <SelectItem value="reserved">Только резерв</SelectItem>
             </SelectContent>
           </Select>
           
@@ -75,6 +93,8 @@ export function ParkingMap() {
           </Button>
         </div>
       </div>
+      {loading && <p className="text-sm text-gray-500">Загрузка данных...</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid grid-cols-4 gap-8">
         {/* Parking Grid */}
@@ -88,28 +108,25 @@ export function ParkingMap() {
             </div>
             
             <div className="grid grid-cols-4 gap-4">
-              {parkingSpots.map((spot) => (
+              {filteredSpots.map((spot) => (
                 <div
                   key={spot.id}
-                  className={`aspect-square rounded-lg border-2 p-4 flex flex-col items-center justify-center relative transition-all duration-200 hover:scale-105 cursor-pointer ${getSpotColor(spot.status)}`}
-                  title={`Место ${spot.id} - ${spot.status === 'free' ? 'свободно' : spot.status === 'occupied' ? 'занято' : 'резерв'}${spot.plate ? ` - ${spot.plate}` : ''}`}
+                  className={`aspect-square rounded-lg border-2 p-4 flex flex-col items-center justify-center relative transition-all duration-200 hover:scale-105 cursor-pointer ${getSpotColor(spot.spot_status)}`}
+                  title={`Место ${spot.spot_number} - ${spot.spot_status === 'free' ? 'свободно' : 'занято'}`}
                 >
-                  <div className="text-sm font-semibold mb-2">{spot.id}</div>
+                  <div className="text-sm font-semibold mb-2">{spot.spot_number}</div>
                   
-                  {spot.status === 'occupied' && (
+                  {spot.spot_status === 'occupied' && (
                     <>
                       <div className="text-2xl mb-1">🚗</div>
-                      <div className="text-xs font-medium">{spot.plate}</div>
+                      <div className="text-xs font-medium">ID {spot.current_vehicle_id ?? '-'}</div>
                     </>
                   )}
                   
-                  {spot.status === 'free' && (
+                  {spot.spot_status === 'free' && (
                     <div className="text-lg">⬜</div>
                   )}
                   
-                  {spot.status === 'reserved' && (
-                    <div className="text-lg">🚧</div>
-                  )}
                 </div>
               ))}
             </div>
@@ -123,15 +140,11 @@ export function ParkingMap() {
             <div className="space-y-3">
               <div className="flex items-center space-x-3">
                 <div className="w-4 h-4 bg-green-500 rounded"></div>
-                <span className="text-sm">Свободно (45 мест)</span>
+                <span className="text-sm">Свободно ({spots.filter((s) => s.spot_status === 'free').length} мест)</span>
               </div>
               <div className="flex items-center space-x-3">
                 <div className="w-4 h-4 bg-red-500 rounded"></div>
-                <span className="text-sm">Занято (105 мест)</span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 bg-yellow-500 rounded"></div>
-                <span className="text-sm">Резерв (0 мест)</span>
+                <span className="text-sm">Занято ({spots.filter((s) => s.spot_status === 'occupied').length} мест)</span>
               </div>
             </div>
           </Card>
@@ -141,7 +154,9 @@ export function ParkingMap() {
             <div className="space-y-4">
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Заполненность</span>
-                <span className="text-sm font-semibold">70%</span>
+                <span className="text-sm font-semibold">
+                  {spots.length ? `${Math.round((spots.filter((s) => s.spot_status === 'occupied').length / spots.length) * 100)}%` : '-'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Пик загрузки</span>
@@ -157,18 +172,16 @@ export function ParkingMap() {
           <Card className="p-6 bg-white shadow-sm">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Активные ТС</h3>
             <div className="space-y-3">
-              {parkingSpots.filter(spot => spot.status === 'occupied').slice(0, 5).map((spot) => (
+              {spots.filter((spot) => spot.spot_status === 'occupied').slice(0, 5).map((spot) => (
                 <div key={spot.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
                   <div className="flex items-center space-x-2">
                     <MapPin className="w-4 h-4 text-gray-400" />
                     <div>
-                      <p className="text-sm font-medium">{spot.plate}</p>
-                      <p className="text-xs text-gray-600">Место {spot.id}</p>
+                      <p className="text-sm font-medium">ТС #{spot.current_vehicle_id ?? '-'}</p>
+                      <p className="text-xs text-gray-600">Место {spot.spot_number}</p>
                     </div>
                   </div>
-                  <span className="text-xs text-gray-500">
-                    {spot.entryTime ? `${Math.floor((Date.now() - spot.entryTime.getTime()) / (1000 * 60 * 60))}ч` : ''}
-                  </span>
+                  <span className="text-xs text-gray-500">занято</span>
                 </div>
               ))}
             </div>

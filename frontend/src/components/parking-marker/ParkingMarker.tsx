@@ -18,7 +18,7 @@ export function ParkingMarker() {
   const [parkingId, setParkingId] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("idle");
   const [spotNumber, setSpotNumber] = useState("");
-  const [spotType, setSpotType] = useState<SpotType>("STANDARD");
+  const [spotType, setSpotType] = useState<SpotType>("standard");
   const [activeSpotId, setActiveSpotId] = useState<number | null>(null);
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [points, setPoints] = useState<number[][]>([]);
@@ -100,7 +100,7 @@ export function ParkingMarker() {
     setMode("idle");
     setActiveSpotId(null);
     setSpotNumber("");
-    setSpotType("STANDARD");
+    setSpotType("standard");
     setPoints([]);
   };
 
@@ -228,10 +228,8 @@ export function ParkingMarker() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                     disabled={mode === "edit"}
                   >
-                    <option value="STANDARD">STANDARD</option>
-                    <option value="DISABLED">DISABLED</option>
-                    <option value="EV">EV</option>
-                    <option value="MOTORCYCLE">MOTORCYCLE</option>
+                    <option value="standard">standard</option>
+                    <option value="disabled">disabled</option>
                   </select>
                 </div>
                 <p className="text-xs text-gray-500">

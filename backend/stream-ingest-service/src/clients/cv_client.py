@@ -36,3 +36,14 @@ class CVServiceClient:
             response = await client.post(f"{self._base_url}/v1/jobs/{cv_job_id}/stop")
             response.raise_for_status()
             return response.json()
+
+    async def push_frame(self, cv_job_id: str, frame_bytes: bytes) -> None:
+        """Отправляет JPEG кадр в CV сервис."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{self._base_url}/v1/jobs/{cv_job_id}/frame",
+                content=frame_bytes,
+                headers={"Content-Type": "image/jpeg"},
+            )
+            response.raise_for_status()
+

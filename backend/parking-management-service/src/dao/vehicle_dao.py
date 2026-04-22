@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
@@ -63,8 +63,17 @@ class VehicleDAO:
             .values(
                 last_camera_id=camera_id,
                 is_inside=is_inside,
-                last_seen=datetime.now(tz=timezone.utc),
+                last_seen=datetime.utcnow(),
             )
+            .returning(Vehicles)
+        )
+        return result.scalar_one_or_none()
+
+    async def set_blocked(self, vehicle_id: int, blocked: bool) -> Optional[Vehicles]:
+        result = await self._session.execute(
+            update(Vehicles)
+            .where(Vehicles.id == vehicle_id)
+            .values(is_blocked=blocked)
             .returning(Vehicles)
         )
         return result.scalar_one_or_none()
