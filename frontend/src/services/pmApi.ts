@@ -130,6 +130,26 @@ export type VehicleRouteRead = {
   total_events: number;
 };
 
+export type AnalyticsOverview = {
+  parking_id: number;
+  total_spots: number;
+  free_spots: number;
+  occupied_spots: number;
+  occupancy_rate: number;
+  avg_duration_minutes: number;
+  peak_occupancy_percent: number;
+  unique_visitors_week: number;
+  total_entries_today: number;
+  total_exits_today: number;
+  current_vehicles: number;
+  peak_hour: string;
+  hourly_traffic: { hour: string; vehicles: number }[];
+  weekly_occupancy: { day: string; occupancy: number }[];
+  duration_distribution: { name: string; value: number; color: string }[];
+  recent_events: { type: string; plate: string; time: string; action: string }[];
+  mini_spots: { id: number; status: "free" | "occupied"; plate: string | null }[];
+};
+
 export const parkingApi = {
   getAll: (params?: { only_active?: boolean; page?: number; size?: number }) =>
     pmApi.get<PaginatedResponse<ParkingRead>>("/parking", { params }),
@@ -168,5 +188,10 @@ export const vehicleApi = {
     pmApi.get<VehicleRouteRead>(`/vehicles/${vehicleId}/history`, { params }),
   setBlockByPlate: (plateNumber: string, blocked: boolean) =>
     pmApi.patch<VehicleRead>(`/vehicles/by-plate/${encodeURIComponent(plateNumber)}/block`, { blocked }),
+};
+
+export const analyticsApi = {
+  getOverview: (parkingId: number) =>
+    pmApi.get<AnalyticsOverview>(`/analytics/${parkingId}/overview`),
 };
 

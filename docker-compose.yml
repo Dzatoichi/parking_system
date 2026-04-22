@@ -41,8 +41,9 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
-#    volumes:
-#      - ./backend/parking-management-service:/app
+    volumes:
+     - ./backend/parking-management-service:/app
+     - /app/.venv
 
 
   cv-processing-service:

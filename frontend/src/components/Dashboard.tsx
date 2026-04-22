@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Car, Clock, TrendingUp, Camera, ParkingSquare } from "lucide-react";
 import { Card } from './ui/card';
 import type { Screen } from "../App";
-import { parkingApi, spotApi } from "../services/pmApi";
-import type { ParkingRead, ParkingStats } from "../services/pmApi";
+import { analyticsApi, parkingApi, spotApi } from "../services/pmApi";
+import type { AnalyticsOverview, ParkingRead, ParkingStats } from "../services/pmApi";
 
 export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => void }) {
   const [parking, setParking] = useState<ParkingRead | null>(null);
   const [statsData, setStatsData] = useState<ParkingStats | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +26,8 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
         setParking(firstParking);
         const statsRes = await spotApi.getStats(firstParking.id);
         setStatsData(statsRes.data);
+        const analyticsRes = await analyticsApi.getOverview(firstParking.id);
+        setAnalytics(analyticsRes.data);
       } catch (e: any) {
         setError(e?.response?.data?.detail ?? e?.message ?? "Ошибка загрузки данных");
       } finally {
@@ -32,6 +35,8 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
       }
     };
     fetchData();
+    const timer = setInterval(fetchData, 30000);
+    return () => clearInterval(timer);
   }, []);
 
   const stats = useMemo(() => {
@@ -49,20 +54,8 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
     ];
   }, [statsData]);
 
-  const recentEvents = [
-    { type: 'entry', plate: 'A123BC', time: '14:32', action: 'Въезд на парковку' },
-    { type: 'exit', plate: 'C567DF', time: '14:28', action: 'Выезд с парковки' },
-    { type: 'parking', plate: 'X891YZ', time: '14:25', action: 'Припаркован на B-12' },
-    { type: 'entry', plate: 'M456NP', time: '14:20', action: 'Въезд на парковку' },
-    { type: 'exit', plate: 'K789QR', time: '14:15', action: 'Выезд с парковки' },
-  ];
-
-  // Mock parking spots for mini map (5x3 grid)
-  const miniParkingSpots = Array.from({ length: 15 }, (_, i) => ({
-    id: i + 1,
-    status: Math.random() > 0.7 ? 'free' : 'occupied',
-    plate: Math.random() > 0.7 ? null : `${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${Math.floor(Math.random() * 900) + 100}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`
-  }));
+  const recentEvents = analytics?.recent_events ?? [];
+  const miniParkingSpots = analytics?.mini_spots ?? [];
 
   return (
     <div className="space-y-6">
@@ -156,7 +149,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
               <div key={index} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
                 <div className="flex items-center space-x-3">
                   <div className={`w-2 h-2 rounded-full ${
-                    event.type === 'entry' ? 'bg-green-500' : 
+                    event.type === 'enter' ? 'bg-green-500' : 
                     event.type === 'exit' ? 'bg-red-500' : 'bg-blue-500'
                   }`}></div>
                   <div>
@@ -185,7 +178,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
                     ? 'bg-green-100 text-green-800 border-2 border-green-200' 
                     : 'bg-red-100 text-red-800 border-2 border-red-200'
                 }`}
-                title={spot.status === 'occupied' ? `Занято ${spot.plate}` : 'Свободно'}
+                title={spot.status === 'occupied' ? `Занято ${spot.plate ?? ""}` : 'Свободно'}
               >
                 {spot.status === 'occupied' ? '🚗' : ''}
               </div>
