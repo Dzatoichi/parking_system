@@ -1,8 +1,68 @@
-_other
-Models
-__pycache__
-.idea
-.venv
-videos
-parking_marker
-cameras_network
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+.python-version
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Test / local tooling
+.tox/
+.nox/
+.hypothesis/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Frontend
+node_modules/
+coverage/
+*.tsbuildinfo
+vite.svg
+
+# Logs and runtime files
+*.log
+*.pid
+*.pid.lock
+*.seed
+
+# Archives / generated binaries
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Project-specific local assets
+_other/
+Models/
+videos/
+parking_marker/
+cameras_network/

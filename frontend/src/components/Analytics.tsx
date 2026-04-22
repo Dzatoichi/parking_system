@@ -1,31 +1,30 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, Users, Clock, DollarSign } from 'lucide-react';
+import { TrendingUp, Users, Clock } from 'lucide-react';
 import { Card } from './ui/card';
+import { analyticsApi, parkingApi } from '../services/pmApi';
+import type { AnalyticsOverview } from '../services/pmApi';
 
 export function Analytics() {
-  // Mock data for charts
-  const hourlyData = [
-    { hour: '6:00', vehicles: 12 },
-    { hour: '8:00', vehicles: 45 },
-    { hour: '10:00', vehicles: 78 },
-    { hour: '12:00', vehicles: 95 },
-    { hour: '14:00', vehicles: 88 },
-    { hour: '16:00', vehicles: 102 },
-    { hour: '18:00', vehicles: 67 },
-    { hour: '20:00', vehicles: 34 },
-    { hour: '22:00', vehicles: 18 },
-  ];
+  const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const weeklyData = [
-    { day: 'Пн', occupancy: 85 },
-    { day: 'Вт', occupancy: 92 },
-    { day: 'Ср', occupancy: 78 },
-    { day: 'Чт', occupancy: 88 },
-    { day: 'Пт', occupancy: 96 },
-    { day: 'Сб', occupancy: 45 },
-    { day: 'Вс', occupancy: 32 },
-  ];
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const parkingRes = await parkingApi.getAll({ only_active: true, page: 1, size: 1 });
+        const firstParking = parkingRes.data.items[0];
+        if (!firstParking) return;
+        const analyticsRes = await analyticsApi.getOverview(firstParking.id);
+        setAnalytics(analyticsRes.data);
+      } catch (e: any) {
+        setError(e?.response?.data?.detail ?? e?.message ?? 'Ошибка загрузки аналитики');
+      }
+    };
+    load();
+    const timer = setInterval(load, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const durationData = [
     { name: '< 1 часа', value: 25, color: '#16a34a' },
@@ -35,7 +34,6 @@ export function Analytics() {
   ];
 
   const metrics = [
-    { label: 'Дневной доход', value: '$1,247', change: '+12%', icon: DollarSign, color: 'text-green-600' },
     { label: 'Ср. длительность', value: '2.5ч', change: '+5%', icon: Clock, color: 'text-blue-600' },
     { label: 'Пик заполненности', value: '96%', change: '+3%', icon: TrendingUp, color: 'text-purple-600' },
     { label: 'Уникальных посетителей', value: '234', change: '+8%', icon: Users, color: 'text-orange-600' },
@@ -47,9 +45,10 @@ export function Analytics() {
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">Аналитика и отчеты</h1>
         <p className="text-gray-600">Детальная информация и метрики производительности</p>
       </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-3 gap-6">
         {metrics.map((metric, index) => {
           const Icon = metric.icon;
           return (
@@ -58,7 +57,7 @@ export function Analytics() {
                 <div>
                   <p className="text-sm font-medium text-gray-600">{metric.label}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">{metric.value}</p>
-                  <p className={`text-sm mt-1 ${metric.color}`}>{metric.change} за неделю</p>
+                  <p className={`text-sm mt-1 ${metric.color}`}>{metric.change || "живые данные"}</p>
                 </div>
                 <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
                   <Icon className="w-5 h-5 text-gray-600" />
@@ -74,7 +73,7 @@ export function Analytics() {
         <Card className="p-6 bg-white shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Почасовая загрузка</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={hourlyData}>
+            <BarChart data={analytics?.hourly_traffic ?? []}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="hour" />
               <YAxis />
@@ -88,7 +87,7 @@ export function Analytics() {
         <Card className="p-6 bg-white shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Недельная заполненность</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={weeklyData}>
+            <LineChart data={analytics?.weekly_occupancy ?? []}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="day" />
               <YAxis />
@@ -112,14 +111,14 @@ export function Analytics() {
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie
-                data={durationData}
+                data={analytics?.duration_distribution ?? []}
                 cx="50%"
                 cy="50%"
                 outerRadius={80}
                 dataKey="value"
                 label={({ name, value }) => `${name}: ${value}%`}
               >
-                {durationData.map((entry, index) => (
+                {(analytics?.duration_distribution ?? []).map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
@@ -134,23 +133,25 @@ export function Analytics() {
           <div className="space-y-4">
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-600">Всего въездов</span>
-              <span className="text-sm font-semibold">127</span>
+              <span className="text-sm font-semibold">{analytics?.total_entries_today ?? 0}</span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-600">Всего выездов</span>
-              <span className="text-sm font-semibold">98</span>
+              <span className="text-sm font-semibold">{analytics?.total_exits_today ?? 0}</span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-600">Текущих ТС</span>
-              <span className="text-sm font-semibold">105</span>
+              <span className="text-sm font-semibold">{analytics?.current_vehicles ?? 0}</span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-gray-100">
               <span className="text-sm text-gray-600">Пиковый час</span>
-              <span className="text-sm font-semibold">16:00</span>
+              <span className="text-sm font-semibold">{analytics?.peak_hour ?? "-"}</span>
             </div>
             <div className="flex justify-between items-center py-3">
               <span className="text-sm text-gray-600">Ср. время</span>
-              <span className="text-sm font-semibold">2ч 34м</span>
+              <span className="text-sm font-semibold">
+                {analytics ? `${Math.round(analytics.avg_duration_minutes)} мин` : "-"}
+              </span>
             </div>
           </div>
         </Card>
@@ -163,7 +164,7 @@ export function Analytics() {
               <div className="w-2 h-2 bg-yellow-500 rounded-full mt-2"></div>
               <div>
                 <p className="text-sm font-medium text-gray-900">Высокая загрузка</p>
-                <p className="text-xs text-gray-600">Парковка заполнена на 96%</p>
+                <p className="text-xs text-gray-600">Парковка заполнена на {Math.round((analytics?.occupancy_rate ?? 0) * 100)}%</p>
                 <p className="text-xs text-gray-500">2 минуты назад</p>
               </div>
             </div>
@@ -172,7 +173,7 @@ export function Analytics() {
               <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
               <div>
                 <p className="text-sm font-medium text-gray-900">Начало пикового времени</p>
-                <p className="text-xs text-gray-600">Обнаружен вечерний трафик</p>
+                <p className="text-xs text-gray-600">Пиковый час: {analytics?.peak_hour ?? "-"}</p>
                 <p className="text-xs text-gray-500">1 час назад</p>
               </div>
             </div>
@@ -181,7 +182,7 @@ export function Analytics() {
               <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
               <div>
                 <p className="text-sm font-medium text-gray-900">Статус системы</p>
-                <p className="text-xs text-gray-600">Все датчики работают</p>
+                <p className="text-xs text-gray-600">Текущих авто на парковке: {analytics?.current_vehicles ?? 0}</p>
                 <p className="text-xs text-gray-500">3 часа назад</p>
               </div>
             </div>
