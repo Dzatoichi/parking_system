@@ -1,27 +1,45 @@
-from fastapi import Depends
-from src.dao.userDAO import UserDAO
-from src.dao.permissionDAO import PermissionDAO
+from collections.abc import AsyncIterator
 
-from src.services.user_service import AuthService
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.base import db_helper
+from src.models.users import User
+from src.schemas.enums import UserRole
+from src.services.auth_service import AuthService
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_user_dao():
-    return UserDAO()
-
-def get_permission_dao():
-    return PermissionDAO()
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async for session in db_helper.session_getter():
+        yield session
 
 
-def get_auth_service(
-        user_repo: UserDAO = Depends(get_user_dao),
-        perm_repo: PermissionDAO = Depends(get_permission_dao),
-) -> AuthService:
-    from src.services.auth_service import AuthService
+async def get_auth_service(session: AsyncSession = Depends(get_session)) -> AuthService:
+    return AuthService(session)
 
-    return AuthService(
-        db_helper=db_helper,
-        user_repo=user_repo,
-        permission_repo=perm_repo,
-    )
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> User:
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header is required",
+        )
+    return await auth_service.get_current_user(credentials.credentials)
+
+
+def require_roles(*roles: UserRole):
+    async def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+
+    return dependency

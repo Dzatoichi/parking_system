@@ -1,35 +1,41 @@
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from collections.abc import AsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from src.settings.config import settings
 
 
 class Base(DeclarativeBase):
-    """
-    Базовый класс для моделей. Все модели наследуются от него.
-    """
-
     pass
 
 
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+)
+
+async_session_maker = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+)
+
+
 class DataBaseHelper:
-    """
-    Вспомогательный класс для  работы с БД.
-    """
+    def __init__(self) -> None:
+        self.engine = engine
+        self.async_session_maker = async_session_maker
 
-    def __init__(self):
-        self.engine = create_async_engine(
-            url=settings.CONNECT_ASYNC(),
-            echo=False,
-        )
-        self.async_session_maker = async_sessionmaker(
-            bind=self.engine,
-            expire_on_commit=False,
-        )
-
-    async def session_getter(self):
+    async def session_getter(self) -> AsyncIterator[AsyncSession]:
         async with self.async_session_maker() as session:
             yield session
 
 
 db_helper = DataBaseHelper()
+
+
+async def init_models() -> None:
+    import src.models  # noqa: F401
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)

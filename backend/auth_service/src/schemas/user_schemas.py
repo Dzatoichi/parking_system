@@ -1,120 +1,68 @@
-import builtins
+from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, field_validator, ConfigDict, StringConstraints, model_validator
-from datetime import datetime
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator, model_validator
 
 from src.schemas.enums import UserRole
 
 
-class UserBaseSchema(BaseModel):
-    """
-    Базовая схема пользователя.
-    """
+PasswordStr = Annotated[str, StringConstraints(min_length=8, max_length=128)]
 
+
+class UserBaseSchema(BaseModel):
     email: EmailStr
+    full_name: str | None = Field(default=None, max_length=255)
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, v: EmailStr) -> str:
-        return v.lower()
+    def normalize_email(cls, value: EmailStr) -> str:
+        return value.lower()
 
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
-
-
-class UserLoginSchema(BaseModel):
-    """
-    Схема аутентификации пользователя.
-    """
-
-    email: EmailStr
-    password: str
-
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
-
-
-class UserRegisterSchema(UserLoginSchema):
-    """
-    Схема регистрации пользователя.
-    """
-
-    confirm_password: str
-    register_token: Annotated[str, StringConstraints(min_length=8, max_length=512)] | None = None
-
-    @model_validator(mode="after")
-    def check_passwords_match(self) -> "UserRegisterSchema":
-        """
-        Метод проверки на совпадение пароля.
-        """
-        if self.password != self.confirm_password:
-            raise ValueError("Пароль не совпадает")
-        return self
-
-
-class UserUpdateSchema(UserBaseSchema):
-    """
-    Схема изменения пользователя.
-    """
-
-    pass
-
-
-class UserUpdateMeSchema(UserBaseSchema):
-    """
-    Схема для изменения собственных данных пользователя
-    """
-
-    pass
 
 
 class UserReadSchema(UserBaseSchema):
-    """
-    Схема получения пользователя.
-    """
-
     id: int
     role: UserRole
+    is_active: bool
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
-
-class UserAuthRequestSchema(BaseModel):
-    """
-    Схема для принятия авторизационного запроса(токена).
-    """
-
-    access_token: Annotated[builtins.str, StringConstraints(min_length=8, max_length=4096)]
-
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
-
-
-class PasswordResetConfirmSchema(BaseModel):
-    """
-    Схема подтверждения сброса пароля пользователя.
-    """
-
-    token: str
-    new_password: str
-    confirm_new_password: str
+class UserRegisterSchema(UserBaseSchema):
+    password: PasswordStr
+    confirm_password: PasswordStr
+    role: UserRole = UserRole.TENANT
+    register_token: Annotated[str | None, StringConstraints(min_length=8, max_length=1024)] = None
 
     @model_validator(mode="after")
-    def check_passwords_match(self) -> "PasswordResetConfirmSchema":
-        if self.new_password != self.confirm_new_password:
+    def check_passwords_match(self) -> "UserRegisterSchema":
+        if self.password != self.confirm_password:
             raise ValueError("Passwords do not match")
         return self
 
 
+class UserLoginSchema(BaseModel):
+    email: EmailStr
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return value.lower()
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class UserUpdateMeSchema(BaseModel):
+    full_name: str | None = Field(default=None, max_length=255)
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
 class UserPasswordUpdateSchema(BaseModel):
-    """
-    Схема изменения пароля пользователя.
-    """
-
-    current_password: str
-    new_password: str
-    confirm_password: str
-
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
+    current_password: PasswordStr
+    new_password: PasswordStr
+    confirm_password: PasswordStr
 
     @model_validator(mode="after")
     def check_passwords_match(self) -> "UserPasswordUpdateSchema":
@@ -124,15 +72,76 @@ class UserPasswordUpdateSchema(BaseModel):
 
 
 class UserForgotPasswordSchema(BaseModel):
-    """
-    Схема запроса на изменение пароля в случае, если пользователь забыл пароль.
-    """
-
     email: EmailStr
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, v: EmailStr) -> str:
-        return v.lower()
+    def normalize_email(cls, value: EmailStr) -> str:
+        return value.lower()
 
-    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
+
+class PasswordResetConfirmSchema(BaseModel):
+    token: Annotated[str, StringConstraints(min_length=16, max_length=256)]
+    new_password: PasswordStr
+    confirm_new_password: PasswordStr
+
+    @model_validator(mode="after")
+    def check_passwords_match(self) -> "PasswordResetConfirmSchema":
+        if self.new_password != self.confirm_new_password:
+            raise ValueError("Passwords do not match")
+        return self
+
+
+class RefreshTokenRequestSchema(BaseModel):
+    refresh_token: Annotated[str, StringConstraints(min_length=16, max_length=4096)]
+
+
+class AuthTokensSchema(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class AuthResponseSchema(BaseModel):
+    user: UserReadSchema
+    tokens: AuthTokensSchema
+
+
+class ForgotPasswordResponseSchema(BaseModel):
+    message: str
+    reset_token: str | None = None
+
+
+class InvitationCreateSchema(BaseModel):
+    email: EmailStr
+    role: UserRole
+    full_name: str | None = Field(default=None, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return value.lower()
+
+    @model_validator(mode="after")
+    def validate_role(self) -> "InvitationCreateSchema":
+        if self.role not in {UserRole.OPERATOR, UserRole.ADMIN}:
+            raise ValueError("Invitation flow is reserved for operator or admin accounts")
+        return self
+
+
+class InvitationReadSchema(BaseModel):
+    email: EmailStr
+    role: UserRole
+    register_token: str
+
+
+class PermissionReadSchema(BaseModel):
+    id: int
+    code_name: str
+    description: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserWithPermissionsSchema(UserReadSchema):
+    permissions: list[PermissionReadSchema] = Field(default_factory=list)

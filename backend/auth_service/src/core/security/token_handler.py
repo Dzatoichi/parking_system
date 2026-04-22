@@ -1,88 +1,54 @@
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 import jwt
 
-from src.schemas.enums import PositionSourceEnum
-from src.schemas.tokens_schemas import TokenTypesEnum
+from src.schemas.enums import TokenType, UserRole
 from src.settings.config import settings
 
 
 class TokenHandler:
-    """
-    Класс для обработки jwt токенов.
-    """
-
-    def __init__(self, token_type: TokenTypesEnum) -> None:
-        """
-        Метод инициализации.
-        """
+    def __init__(self, token_type: TokenType) -> None:
         self.token_type = token_type
-        self.algorithm, self.key, self.expire_time = settings.get_jwt_params(token_type=token_type).values()
+        self.algorithm, self.key, self.expire_time = settings.jwt_params(token_type.value)
 
-    def sign_jwt(self, user_id: int) -> tuple[Any, datetime | int | None]:
-        """
-        Метод шифрования jwt токена.
-        """
-        if self.token_type == "refresh":
-            expire_time = timedelta(days=self.expire_time)
+    def sign_user_token(self, user_id: int, role: UserRole) -> tuple[str, datetime]:
+        if self.token_type == TokenType.REFRESH:
+            ttl = timedelta(days=self.expire_time)
         else:
-            expire_time = timedelta(minutes=self.expire_time)
+            ttl = timedelta(minutes=self.expire_time)
+
+        expires_at = datetime.now(timezone.utc) + ttl
         payload = {
-            "user_id": user_id,
-            "exp": datetime.now(timezone.utc) + expire_time,
-            "jti": str(uuid.uuid4()),
+            "sub": str(user_id),
+            "role": role.value,
+            "type": self.token_type.value,
+            "exp": expires_at,
+            "iat": datetime.now(timezone.utc),
+            "jti": str(uuid4()),
         }
-        token = jwt.encode(
-            payload=payload,
-            key=self.key,
-            algorithm=self.algorithm,
-        )
-        return token, payload.get("exp")
+        token = jwt.encode(payload, self.key, algorithm=self.algorithm)
+        return token, expires_at
 
-    def sign_register_jwt(
-        self,
-        pvz_id: int,
-        owner_id: int,
-        position_id: int,
-        position_source: PositionSourceEnum,
-    ) -> tuple[Any, datetime | int | None]:
-        """
-        Метод шифрования register jwt токена с дополнительными данными.
-        """
-        if self.token_type != TokenTypesEnum.register:
-            raise ValueError("This method can only be used for registration tokens")
-
-        expire_time = timedelta(hours=self.expire_time)
-
+    def sign_register_token(self, email: str, role: UserRole, full_name: str | None = None) -> tuple[str, datetime]:
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=self.expire_time)
         payload = {
-            "pvz_id": pvz_id,
-            "owner_id": owner_id,
-            "position_id": position_id,
-            "position_source": position_source,
-            "exp": datetime.now(timezone.utc) + expire_time,
+            "email": email,
+            "role": role.value,
+            "full_name": full_name,
+            "type": self.token_type.value,
+            "exp": expires_at,
+            "iat": datetime.now(timezone.utc),
+            "jti": str(uuid4()),
         }
+        token = jwt.encode(payload, self.key, algorithm=self.algorithm)
+        return token, expires_at
 
-        token = jwt.encode(
-            payload=payload,
-            key=self.key,
-            algorithm=self.algorithm,
+    def decode(self, token: str) -> dict[str, Any]:
+        return jwt.decode(
+            token,
+            self.key,
+            algorithms=[self.algorithm],
+            options={"require": ["exp", "type"]},
         )
-        return token, payload.get("exp")
-
-    def decode_jwt(self, token: str) -> dict | None:
-        """
-        Метод дешифрования jwt токена.
-        """
-        try:
-            return jwt.decode(
-                token,
-                key=self.key,
-                algorithms=[self.algorithm],
-                options={"require": ["exp"]},
-            )
-        except jwt.ExpiredSignatureError:
-            return None
-        except jwt.InvalidTokenError:
-            return None

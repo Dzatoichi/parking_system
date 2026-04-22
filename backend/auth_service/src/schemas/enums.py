@@ -1,8 +1,14 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class UserRole(Enum):
-    LANDLORD = "landlord"
+class UserRole(StrEnum):
     TENANT = "tenant"
+    LANDLORD = "landlord"
     OPERATOR = "operator"
-    admin = "admin"
+    ADMIN = "admin"
+
+
+class TokenType(StrEnum):
+    ACCESS = "access"
+    REFRESH = "refresh"
+    REGISTER = "register"

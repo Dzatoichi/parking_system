@@ -1,6 +1,21 @@
-version: "3.9"
-
 services:
+  postgres-auth:
+    image: postgres:16
+    container_name: postgres-auth
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_DB: auth_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - auth-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   postgres-parking:
     build:
       context: ./backend/parking-management-service/postgres
@@ -33,26 +48,60 @@ services:
     environment:
       DB_HOST: postgres-parking
       DB_PORT: 5432
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "8000:8000"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 30s
     volumes:
-     - ./backend/parking-management-service:/app
-     - /app/.venv
+      - ./backend/parking-management-service:/app
 
+  auth-service:
+    build:
+      context: ./backend/auth_service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    env_file:
+      - ./backend/auth_service/.env
+    environment:
+      DB_HOST: postgres-auth
+      DB_PORT: 5432
+      WATCHFILES_FORCE_POLLING: "true"
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    volumes:
+      - ./backend/auth_service:/app
 
   cv-processing-service:
     build:
       context: ./backend/cv-processing-service
       dockerfile: Dockerfile
     container_name: cv-processing-service
+    env_file:
+      - ./backend/cv-processing-service/.env
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
     volumes:
       - ./backend/cv-processing-service:/app
 
@@ -62,11 +111,21 @@ services:
       dockerfile: Dockerfile
     container_name: stream-ingest-service
     depends_on:
-      - cv-processing-service
+      cv-processing-service:
+        condition: service_healthy
+    env_file:
+      - ./backend/stream-ingest-service/.env
     environment:
       CV_SERVICE_URL: http://cv-processing-service:8001
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "8002:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
     volumes:
       - ./backend/stream-ingest-service:/app
 
@@ -78,10 +137,16 @@ services:
     depends_on:
       parking-management-service:
         condition: service_healthy
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_API_PROXY_TARGET: http://parking-management-service:8000
     ports:
-      - "3000:80"
-    networks:
-      - default
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app
+      - frontend-node-modules:/app/node_modules
 
 volumes:
+  auth-pgdata:
   pgdata:
+  frontend-node-modules:

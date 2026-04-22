@@ -1,111 +1,48 @@
-from fastapi_pagination import Page, Params
-from fastapi_pagination.ext.sqlalchemy import apaginate
-from pydantic import EmailStr
 from sqlalchemy import delete, insert, select
-from sqlalchemy.exc import NoResultFound
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.dao.baseDAO import BaseDAO
-from src.models.user_permissions.user_permissions import UserPermissions
-from src.models.users.users import Users
+from src.models.user_permissions import UserPermission
+from src.models.users import User
 
 
-class UserDAO(BaseDAO[Users]):
-    """
-    Класс, наследующий базовый DAO для работы с сущностями пользователя.
-    """
+class UserDAO(BaseDAO[User]):
+    model = User
 
-    def __init__(self):
-        super().__init__(model=Users)
-
-    @BaseDAO.with_exception
-    async def get_user_by_email(self, email: EmailStr) -> Users | None:
-        """
-        Метод получения пользователя по email.
-        """
-        async with self._get_session() as session:
-            stmt = select(self.model).where(self.model.email == email)
-            res = await session.execute(stmt)
-            return res.scalars().first()
-
-    @BaseDAO.with_exception
-    async def get_users_by_ids(self, user_ids: list[int]) -> list[Users]:
-        """
-        Получает список пользователей по списку их ID одним запросом.
-        WHERE id IN (...)
-        """
-        async with self._get_session() as session:
-            stmt = select(self.model).where(self.model.id.in_(user_ids))
-            res = await session.execute(stmt)
-            return list(res.scalars().all())
-
-    @BaseDAO.with_exception
-    async def set_password(self, user_id: int, hashed_password: str) -> bool:
-        """
-        Метод изменения пароля.
-        """
-        updated_user = await self.update(id=user_id, hashed_password=hashed_password)
-        if not updated_user:
-            raise NoResultFound(f"Пользователь с id={user_id} не найден")
-        return True
-
-    @BaseDAO.with_exception
-    async def assign_permissions(self, user_id: int, permissions: list[int], session: AsyncSession) -> None:
-        """Назначает пользователю список permissions"""
-        stmt = insert(UserPermissions).values([{"user_id": user_id, "permission_id": p_id} for p_id in permissions])
-        await session.execute(stmt)
-
-    @BaseDAO.with_exception
-    async def create_user(self, payload: dict, session: AsyncSession) -> Users:
-        """Метод создания пользователя"""
-        user = self.model(**payload)
-        session.add(user)
-        await session.flush()
-        return user
-
-    @BaseDAO.with_exception
-    async def update_user_permissions(
-        self,
-        session: AsyncSession,
-        user_id: int,
-        new_permission_ids: list[int],
-    ) -> None:
-        """Полностью обновляет права пользователя: удаляет все старые и вставляет новые."""
-
-        await session.execute(delete(UserPermissions).where(UserPermissions.user_id == user_id))
-
-        await session.execute(
-            insert(UserPermissions).values([{"user_id": user_id, "permission_id": p_id} for p_id in new_permission_ids])
+    async def get_by_email(self, email: str) -> User | None:
+        stmt = (
+            select(User)
+            .options(
+                selectinload(User.permission_links).selectinload(UserPermission.permission),
+                selectinload(User.refresh_tokens),
+                selectinload(User.reset_tokens),
+            )
+            .where(User.email == email)
         )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    @BaseDAO.with_exception
-    async def get_users(
-        self,
-        params: Params,
-    ) -> Page[Users]:
-        """
-        Получает список пользователей с пагинацией.
-        """
-        async with self._get_session() as session:
-            stmt = select(self.model)
+    async def get_with_permissions(self, user_id: int) -> User | None:
+        stmt = (
+            select(User)
+            .options(selectinload(User.permission_links).selectinload(UserPermission.permission))
+            .where(User.id == user_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-            stmt = stmt.order_by(self.model.id.desc())
+    async def create_user(self, payload: dict) -> User:
+        return await self.create(payload)
 
-            return await apaginate(session, stmt, params)
+    async def set_password(self, user_id: int, hashed_password: str) -> User | None:
+        return await self.update(user_id, hashed_password=hashed_password)
 
-    async def update_users_permissions(self, user_ids: list[int], permission_ids: list[int]) -> None:
-        """
-        Массовое обновление прав.
-        Сначала удаляет старые, потом пишет новые.
-        """
-        async with self._get_session() as session:
-            stmt_delete = delete(UserPermissions).where(UserPermissions.user_id.in_(user_ids))
-            await session.execute(stmt_delete)
-
-            values_to_insert = [
-                {"user_id": u_id, "permission_id": p_id} for u_id in user_ids for p_id in permission_ids
-            ]
-
-            stmt_insert = insert(UserPermissions).values(values_to_insert)
-            await session.execute(stmt_insert)
-            await session.commit()
+    async def replace_permissions(self, user_id: int, permission_ids: list[int]) -> None:
+        await self.session.execute(
+            delete(UserPermission).where(UserPermission.user_id == user_id)
+        )
+        if permission_ids:
+            await self.session.execute(
+                insert(UserPermission),
+                [{"user_id": user_id, "permission_id": permission_id} for permission_id in permission_ids],
+            )

@@ -1,196 +1,113 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import jwt
+from fastapi import HTTPException, status
+
+from src.core.security.hash_helper import hash_helper
 from src.core.security.token_handler import TokenHandler
-from src.dao.tokensDAO import RefreshTokensDAO, StatefulTokenDAO
-from src.models.tokens.stateful_tokens import StatefulTokens
-from src.schemas.enums import PositionSourceEnum
-from src.schemas.tokens_schemas import TokenTypesEnum
+from src.dao.tokensDAO import RefreshTokenDAO, StatefulTokenDAO
+from src.models.tokens.stateful_tokens import StatefulToken
+from src.schemas.enums import TokenType, UserRole
 from src.settings.config import settings
-from src.utils.exceptions import (
-    InvalidTokenException,
-    TokenExpiredException,
-)
 
 
 class JWTTokensService:
-    """
-    Класс сервиса для работы с jwt токенами.
-    """
+    def __init__(self, refresh_token_dao: RefreshTokenDAO) -> None:
+        self.refresh_token_dao = refresh_token_dao
 
-    def __init__(self, repo: RefreshTokensDAO) -> None:
-        self.repo = repo
+    async def create_auth_tokens(self, user_id: int, role: UserRole) -> dict[str, str]:
+        access_token, _ = TokenHandler(TokenType.ACCESS).sign_user_token(user_id=user_id, role=role)
+        refresh_token, expires_at = TokenHandler(TokenType.REFRESH).sign_user_token(user_id=user_id, role=role)
 
-    async def create_token(
-        self,
-        token_type: TokenTypesEnum,
-        user_id: int,
-    ) -> str:
-        """
-        Функция генерации access или refresh токена.
-        """
-        token_handler = TokenHandler(token_type=token_type)
-        token, expires_at = token_handler.sign_jwt(user_id=user_id)
-
-        if token_type == TokenTypesEnum.refresh:
-            token_hash = hash_helper.hash_token(token=token)
-            payload = {
+        await self.refresh_token_dao.create(
+            {
                 "user_id": user_id,
-                "token_hash": token_hash,
+                "token_hash": hash_helper.hash_token(refresh_token),
                 "issued_at": datetime.now(timezone.utc),
                 "expires_at": expires_at,
+                "revoked": False,
             }
-            await self.repo.create(payload=payload)
-
-        return token
-
-    async def create_register_token(
-        self,
-        token_type: TokenTypesEnum,
-        pvz_id: int,
-        owner_id: int,
-        position_id: int,
-        position_source: PositionSourceEnum,
-    ) -> str:
-        """
-        Создание JWT токена для регистрации сотрудника.
-        """
-
-        token_handler = TokenHandler(token_type=token_type)
-        token, expires_at = token_handler.sign_register_jwt(
-            pvz_id=pvz_id,
-            owner_id=owner_id,
-            position_id=position_id,
-            position_source=position_source,
-        )
-        return token
-
-    async def revoke_token(
-        self,
-        token: str,
-    ) -> bool:
-        """
-        Функция для обозначения токена, как отозванного.
-        """
-
-        token_hash = hash_helper.hash_token(token=token)
-        await self.repo.set_token_revoked(token_hash=token_hash)
-
-        return True
-
-    async def refresh_token(
-        self,
-        refresh_token: str,
-    ) -> dict[str, str]:
-        """
-        Функция для обновления access-токена, выдачи нового refresh-токена.
-        """
-        token_payload = await self.validate_token(
-            token=refresh_token,
-            token_type=TokenTypesEnum.refresh,
         )
 
-        access_token = await self.create_token(
-            token_type=TokenTypesEnum.access,
-            user_id=token_payload.get("user_id"),
-        )
-
-        await self.revoke_token(
-            token=refresh_token,
-        )
-
-        new_refresh_token = await self.create_token(
-            token_type=TokenTypesEnum.refresh,
-            user_id=token_payload.get("user_id"),
-        )
         return {
             "access_token": access_token,
-            "refresh_token": new_refresh_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
         }
 
-    async def validate_token(self, token: str, token_type: TokenTypesEnum) -> dict:
-        """
-        Функция для валидации refresh или access токена.
-        """
-        token_handler = TokenHandler(token_type=token_type)
+    async def revoke_refresh_token(self, token: str) -> None:
+        await self.refresh_token_dao.revoke(hash_helper.hash_token(token))
 
-        token_payload = token_handler.decode_jwt(token=token)
-        if not token_payload:
-            raise InvalidTokenException("Invalid token")
+    async def validate_refresh_token(self, token: str) -> dict:
+        try:
+            payload = TokenHandler(TokenType.REFRESH).decode(token)
+        except jwt.PyJWTError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+            ) from exc
 
-        exp_time = datetime.fromtimestamp(token_payload.get("exp"), tz=timezone.utc)
-        if exp_time < datetime.now(timezone.utc):
-            raise TokenExpiredException("Token expired")
+        token_hash = hash_helper.hash_token(token)
+        token_record = await self.refresh_token_dao.get_by_token_hash(token_hash)
+        if not token_record or token_record.revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked",
+            )
 
-        if token_type == TokenTypesEnum.access:
-            return token_payload
+        return payload
 
-        if token_type == TokenTypesEnum.register:
-            required_fields = ["pvz_id", "owner_id"]
-            for field in required_fields:
-                if field not in token_payload:
-                    raise InvalidTokenException(f"Missing required field: {field}")
-            return token_payload
+    def validate_access_token(self, token: str) -> dict:
+        try:
+            return TokenHandler(TokenType.ACCESS).decode(token)
+        except jwt.PyJWTError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid access token",
+            ) from exc
 
-        token_hash = hash_helper.hash_token(token=token)
-        token_info = await self.repo.get_token_by_token_hash(token_hash=token_hash)
+    def create_register_token(self, email: str, role: UserRole, full_name: str | None = None) -> str:
+        token, _ = TokenHandler(TokenType.REGISTER).sign_register_token(
+            email=email,
+            role=role,
+            full_name=full_name,
+        )
+        return token
 
-        if not token_info or token_info.revoked:
-            raise InvalidTokenException("Invalid token")
-
-        return token_payload
+    def validate_register_token(self, token: str) -> dict:
+        try:
+            return TokenHandler(TokenType.REGISTER).decode(token)
+        except jwt.PyJWTError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid registration token",
+            ) from exc
 
 
 class StatefulTokenService:
-    """
-    Класс сервиса обработки stateful токенов.
-    """
-
     def __init__(self, dao: StatefulTokenDAO) -> None:
         self.dao = dao
 
-    async def create_stateful_token(
-        self,
-        user_id: int,
-    ):
-        """
-        Метод генерации stateful токена и его возвращении в виде строки.
-        """
-
-        token_str = secrets.token_urlsafe(32)
+    async def create_reset_token(self, user_id: int) -> StatefulToken:
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.STATEFUL_TOKEN_EXPIRE_MINUTES)
+        return await self.dao.create(
+            {
+                "token": secrets.token_urlsafe(32),
+                "user_id": user_id,
+                "expires_at": expires_at,
+                "used": False,
+            }
+        )
 
-        payload = {
-            "token": token_str,
-            "user_id": user_id,
-            "expires_at": expires_at,
-            "used": False,
-        }
-        return await self.dao.create(payload)
-
-    async def get_reset_token_data(self, token: str) -> StatefulTokens | None:
-        """
-        Метод получения данных токена и его валиадации.
-        """
-        return await self.validate_token(token)
-
-    async def mark_token_as_used(
-        self,
-        token_obj: StatefulTokens,
-    ) -> None:
-        """
-        Метод пометки токена, как использованного.
-        """
-        await self.dao.mark_as_used(token_obj.id)
-
-    async def validate_token(
-        self,
-        token: str,
-    ) -> StatefulTokens | None:
-        """
-        Метод валидации stateful токена.
-        """
+    async def validate_reset_token(self, token: str) -> StatefulToken:
         token_obj = await self.dao.get_by_token(token)
         if not token_obj or token_obj.used or token_obj.expires_at < datetime.now(timezone.utc):
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reset token is invalid or expired",
+            )
         return token_obj
+
+    async def mark_token_as_used(self, token_id: int) -> None:
+        await self.dao.mark_as_used(token_id)

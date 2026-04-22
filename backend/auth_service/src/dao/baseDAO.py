@@ -1,117 +1,43 @@
-from contextlib import asynccontextmanager
-from functools import wraps
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
+from collections.abc import Sequence
+from typing import Any, Generic, TypeVar
 
 from sqlalchemy import delete, select, update
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.base import Base, db_helper
+from src.database.base import Base
 
-T = TypeVar("T", bound=Base)
+ModelT = TypeVar("ModelT", bound=Base)
 
 
-class BaseDAO(Generic[T]):
-    """
-    Базовый класс DAO для работы с ORM-моделями.
-    """
+class BaseDAO(Generic[ModelT]):
+    model: type[ModelT]
 
-    def __init__(self, model: Optional[Type[T]] = None):
-        """
-        Метод инициализации.
-        """
-        if model is not None:
-            self.model = model
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 
-        if not hasattr(self, "model") or self.model is None:
-            raise TypeError("Отсутствует модель")
+    async def create(self, payload: dict[str, Any]) -> ModelT:
+        entity = self.model(**payload)
+        self.session.add(entity)
+        await self.session.flush()
+        await self.session.refresh(entity)
+        return entity
 
-        self._db_helper = db_helper
+    async def get_by_id(self, entity_id: int) -> ModelT | None:
+        stmt = select(self.model).where(self.model.id == entity_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    @asynccontextmanager
-    async def _get_session(self) -> AsyncSession:
-        """
-        Метод получения сессии.
-        """
-        async with self._db_helper.async_session_maker() as session:
-            try:
-                yield session
-            except SQLAlchemyError as e:
-                await session.rollback()
-                raise e
-            finally:
-                await session.close()
+    async def list_all(self) -> Sequence[ModelT]:
+        stmt = select(self.model).order_by(self.model.id.asc())
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
 
-    @staticmethod
-    def with_exception(func):
-        """
-        Декоратор, оборачивающий метод для обработки и проброса исключения дальше.
-        """
+    async def update(self, entity_id: int, **kwargs: Any) -> ModelT | None:
+        stmt = update(self.model).where(self.model.id == entity_id).values(**kwargs).returning(self.model)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            try:
-                return await func(*args, **kwargs)
-            except SQLAlchemyError as e:
-                raise e
-            except Exception as e:
-                raise e
-
-        return async_wrapper
-
-    @with_exception
-    async def create(self, payload: Dict[str, Any]) -> T:
-        """
-        Базовый метод создания сущности.
-        """
-        obj = self.model(**payload)
-        async with self._get_session() as session:
-            session.add(obj)
-            await session.commit()
-            await session.refresh(obj)
-            return obj
-
-    @with_exception
-    async def get_by_id(self, id: int) -> Optional[T]:
-        """
-        Базовый метод получения сущности по id.
-        """
-        stmt = select(self.model).where(self.model.id == id)
-        async with self._get_session() as session:
-            result = await session.execute(stmt)
-            return result.scalar_one_or_none()
-
-    @with_exception
-    async def get_all(self) -> List[T]:
-        """
-        Базовый метод получения сущностей.
-        """
-        stmt = select(self.model)
-        async with self._get_session() as session:
-            result = await session.execute(stmt)
-            return result.scalars().all()
-
-    @with_exception
-    async def update(self, id: int, **kwargs) -> Optional[T]:
-        """
-        Базовый метод изменения сущностей.
-        """
-        async with self._get_session() as session:
-            stmt = update(self.model).where(self.model.id == id).values(**kwargs).returning(self.model)
-            result = await session.execute(stmt)
-            await session.commit()
-            updated = result.scalar_one_or_none()
-            if updated:
-                await session.refresh(updated)
-            return updated
-
-    @with_exception
-    async def delete(self, id: int) -> bool:
-        """
-        Базовый метод удаления сущностей.
-        """
-        async with self._get_session() as session:
-            stmt = delete(self.model).where(self.model.id == id)
-            result = await session.execute(stmt)
-            await session.commit()
-            return result.rowcount > 0
+    async def delete(self, entity_id: int) -> bool:
+        stmt = delete(self.model).where(self.model.id == entity_id)
+        result = await self.session.execute(stmt)
+        return bool(result.rowcount)
