@@ -8,7 +8,7 @@ import {
   Camera,
   ParkingSquare,
 } from 'lucide-react';
-import { Screen } from '../App';
+import type { Screen } from '../app/screens';
 
 interface SidebarProps {
   currentScreen: Screen;
