@@ -6,7 +6,7 @@ import { useActiveParking } from "./useActiveParking";
 
 const ANALYTICS_POLL_INTERVAL_MS = 30_000;
 const NO_ACTIVE_PARKING_MESSAGE =
-  "РќРµС‚ Р°РєС‚РёРІРЅС‹С… РїР°СЂРєРѕРІРѕРє. Р”РѕР±Р°РІСЊС‚Рµ РґР°РЅРЅС‹Рµ РІ Р‘Р”.";
+  "Нет активных парковок. Добавьте данные в БД.";
 
 export function useAnalyticsOverview() {
   const parkingQuery = useActiveParking({ refetchInterval: ANALYTICS_POLL_INTERVAL_MS });
@@ -27,7 +27,7 @@ export function useAnalyticsOverview() {
     error:
       parkingQuery.isSuccess && parkingQuery.data === null
         ? NO_ACTIVE_PARKING_MESSAGE
-        : getApiErrorMessage(analyticsQuery.error ?? parkingQuery.error, "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё Р°РЅР°Р»РёС‚РёРєРё"),
+        : getApiErrorMessage(analyticsQuery.error ?? parkingQuery.error, "Ошибка загрузки аналитики"),
     loading:
       parkingQuery.isLoading ||
       parkingQuery.isFetching ||

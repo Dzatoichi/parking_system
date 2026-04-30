@@ -11,7 +11,7 @@ import { useActiveParking } from "./useActiveParking";
 
 const DASHBOARD_POLL_INTERVAL_MS = 30_000;
 const NO_ACTIVE_PARKING_MESSAGE =
-  "РќРµС‚ Р°РєС‚РёРІРЅС‹С… РїР°СЂРєРѕРІРѕРє. Р”РѕР±Р°РІСЊС‚Рµ РґР°РЅРЅС‹Рµ РІ Р‘Р”.";
+  "Нет активных парковок. Добавьте данные в БД.";
 
 export function useDashboardData() {
   const parkingQuery = useActiveParking({ refetchInterval: DASHBOARD_POLL_INTERVAL_MS });
@@ -40,7 +40,7 @@ export function useDashboardData() {
   const error =
     getApiErrorMessage(
       parkingQuery.error ?? statsQuery.error ?? analyticsQuery.error,
-      "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РґР°РЅРЅС‹С…",
+      "Ошибка загрузки данных",
     ) ??
     null;
 

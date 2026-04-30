@@ -80,7 +80,7 @@ export function useVehicleSearchData() {
   return {
     error: getApiErrorMessage(
       vehiclesQuery.error ?? activeParkingQuery.error,
-      "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С‚СЂР°РЅСЃРїРѕСЂС‚Р°",
+      "Ошибка загрузки транспорта",
     ),
     history: historyQuery.data ?? [],
     loading:

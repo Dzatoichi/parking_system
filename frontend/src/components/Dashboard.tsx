@@ -11,27 +11,27 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
   const stats = useMemo(() => {
     if (!statsData) {
       return [
-        { label: "Р’СЃРµРіРѕ РјРµСЃС‚", value: "-", icon: Car, color: "bg-blue-600" },
-        { label: "РЎРІРѕР±РѕРґРЅРѕ", value: "-", icon: Car, color: "bg-green-600" },
-        { label: "Р—Р°РЅСЏС‚Рѕ", value: "-", icon: Car, color: "bg-red-600" },
+        { label: "Всего мест", value: "-", icon: Car, color: "bg-blue-600" },
+        { label: "Свободно", value: "-", icon: Car, color: "bg-green-600" },
+        { label: "Занято", value: "-", icon: Car, color: "bg-red-600" },
       ];
     }
 
     return [
       {
-        label: "Р’СЃРµРіРѕ РјРµСЃС‚",
+        label: "Всего мест",
         value: String(statsData.total_spots),
         icon: Car,
         color: "bg-blue-600",
       },
       {
-        label: "РЎРІРѕР±РѕРґРЅРѕ",
+        label: "Свободно",
         value: String(statsData.free),
         icon: Car,
         color: "bg-green-600",
       },
       {
-        label: "Р—Р°РЅСЏС‚Рѕ",
+        label: "Занято",
         value: String(statsData.occupied),
         icon: Car,
         color: "bg-red-600",
@@ -45,24 +45,24 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900 mb-2">РџР°РЅРµР»СЊ СѓРїСЂР°РІР»РµРЅРёСЏ</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-2">Панель управления</h1>
         <p className="text-gray-600">
           {parking
-            ? `РћР±Р·РѕСЂ: ${parking.name}, ${parking.address}`
-            : "РћР±Р·РѕСЂ СЃРѕСЃС‚РѕСЏРЅРёСЏ РїР°СЂРєРѕРІРѕС‡РЅРѕР№ СЃРёСЃС‚РµРјС‹ РІ СЂРµР°Р»СЊРЅРѕРј РІСЂРµРјРµРЅРё"}
+            ? `Обзор: ${parking.name}, ${parking.address}`
+            : "Обзор состояния парковочной системы в реальном времени"}
         </p>
       </div>
-      {loading && <p className="text-sm text-gray-500">Р—Р°РіСЂСѓР·РєР° РґР°РЅРЅС‹С…...</p>}
+      {loading && <p className="text-sm text-gray-500">Загрузка данных...</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid grid-cols-2 gap-6">
         <Card className="p-6 bg-white shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">РРЅСЃС‚СЂСѓРјРµРЅС‚С‹</p>
-              <p className="text-lg font-semibold text-gray-900 mt-1">Р Р°Р·РјРµС‚РєР° РјРµСЃС‚</p>
+              <p className="text-sm font-medium text-gray-600">Инструменты</p>
+              <p className="text-lg font-semibold text-gray-900 mt-1">Разметка мест</p>
               <p className="text-sm text-gray-500 mt-1">
-                РЎРѕР·РґР°РЅРёРµ/РѕР±РЅРѕРІР»РµРЅРёРµ СЂР°Р·РјРµС‚РєРё РїР°СЂРєРѕРІРѕС‡РЅС‹С… РјРµСЃС‚
+                Создание/обновление разметки парковочных мест
               </p>
             </div>
             <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
@@ -73,16 +73,16 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
             onClick={() => onNavigate?.("parking-marker")}
             className="mt-4 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
-            РћС‚РєСЂС‹С‚СЊ
+            Открыть
           </button>
         </Card>
 
         <Card className="p-6 bg-white shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">РРЅСЃС‚СЂСѓРјРµРЅС‚С‹</p>
-              <p className="text-lg font-semibold text-gray-900 mt-1">РќР°СЃС‚СЂРѕР№РєР° РєР°РјРµСЂ</p>
-              <p className="text-sm text-gray-500 mt-1">Р”РѕР±Р°РІР»РµРЅРёРµ RTSP Рё РєР°Р»РёР±СЂРѕРІРєР°</p>
+              <p className="text-sm font-medium text-gray-600">Инструменты</p>
+              <p className="text-lg font-semibold text-gray-900 mt-1">Настройка камер</p>
+              <p className="text-sm text-gray-500 mt-1">Добавление RTSP и калибровка</p>
             </div>
             <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
               <Camera className="w-6 h-6 text-white" />
@@ -92,7 +92,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
             onClick={() => onNavigate?.("cameras-network")}
             className="mt-4 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
-            РћС‚РєСЂС‹С‚СЊ
+            Открыть
           </button>
         </Card>
       </div>
@@ -121,7 +121,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
       <div className="grid grid-cols-2 gap-6">
         <Card className="p-6 bg-white shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">РџРѕСЃР»РµРґРЅРёРµ СЃРѕР±С‹С‚РёСЏ</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Последние события</h3>
             <Clock className="w-5 h-5 text-gray-400" />
           </div>
           <div className="space-y-3">
@@ -153,7 +153,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
 
         <Card className="p-6 bg-white shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">РћР±Р·РѕСЂ РїР°СЂРєРѕРІРєРё</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Обзор парковки</h3>
             <TrendingUp className="w-5 h-5 text-gray-400" />
           </div>
           <div className="grid grid-cols-5 gap-2">
@@ -165,9 +165,9 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
                     ? "bg-green-100 text-green-800 border-2 border-green-200"
                     : "bg-red-100 text-red-800 border-2 border-red-200"
                 }`}
-                title={spot.status === "occupied" ? `Р—Р°РЅСЏС‚Рѕ ${spot.plate ?? ""}` : "РЎРІРѕР±РѕРґРЅРѕ"}
+                title={spot.status === "occupied" ? `Занято ${spot.plate ?? ""}` : "Свободно"}
               >
-                {spot.status === "occupied" ? "рџљ—" : ""}
+                {spot.status === "occupied" ? "🚗" : ""}
               </div>
             ))}
           </div>
@@ -175,15 +175,15 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
                 <div className="w-3 h-3 bg-green-500 rounded-full" />
-                <span className="text-sm text-gray-600">РЎРІРѕР±РѕРґРЅРѕ</span>
+                <span className="text-sm text-gray-600">Свободно</span>
               </div>
               <div className="flex items-center space-x-2">
                 <div className="w-3 h-3 bg-red-500 rounded-full" />
-                <span className="text-sm text-gray-600">Р—Р°РЅСЏС‚Рѕ</span>
+                <span className="text-sm text-gray-600">Занято</span>
               </div>
             </div>
             <span className="text-sm text-gray-500">
-              Р—Р°РїРѕР»РЅРµРЅРЅРѕСЃС‚СЊ {statsData ? `${Math.round(statsData.occupancy_rate * 100)}%` : "-"}
+              Заполненность {statsData ? `${Math.round(statsData.occupancy_rate * 100)}%` : "-"}
             </span>
           </div>
         </Card>

@@ -5,7 +5,7 @@ import { spotApi, type SpotReadShort } from "../services/pmApi";
 import { useActiveParking } from "./useActiveParking";
 
 const NO_ACTIVE_PARKING_MESSAGE =
-  "РќРµС‚ Р°РєС‚РёРІРЅС‹С… РїР°СЂРєРѕРІРѕРє. Р”РѕР±Р°РІСЊС‚Рµ РґР°РЅРЅС‹Рµ РІ Р‘Р”.";
+  "Нет активных парковок. Добавьте данные в БД.";
 
 function normalizeSpots(spots: SpotReadShort[]) {
   return spots.map((spot) =>
@@ -31,7 +31,7 @@ export function useParkingMapData() {
     error:
       parkingQuery.isSuccess && parkingQuery.data === null
         ? NO_ACTIVE_PARKING_MESSAGE
-        : getApiErrorMessage(spotsQuery.error ?? parkingQuery.error, "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РґР°РЅРЅС‹С…"),
+        : getApiErrorMessage(spotsQuery.error ?? parkingQuery.error, "Ошибка загрузки данных"),
     loading:
       parkingQuery.isLoading ||
       parkingQuery.isFetching ||
