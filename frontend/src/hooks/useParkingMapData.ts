@@ -7,11 +7,13 @@ import { useActiveParking } from "./useActiveParking";
 const NO_ACTIVE_PARKING_MESSAGE =
   "Нет активных парковок. Добавьте данные в БД.";
 
-function normalizeSpots(spots: SpotReadShort[]) {
-  return spots.map((spot) =>
-    spot.spot_status === "reserved" ? { ...spot, spot_status: "occupied" as const } : spot,
-  );
-}
+const SPOTS_POLL_INTERVAL_MS = 30_000
+
+// function normalizeSpots(spots: SpotReadShort[]) {
+//   return spots.map((spot) =>
+//     spot.spot_status === "reserved" ? { ...spot, spot_status: "occupied" as const } : spot,
+//   );
+// }
 
 export function useParkingMapData() {
   const parkingQuery = useActiveParking();
@@ -21,9 +23,11 @@ export function useParkingMapData() {
     queryKey: ["parkingMapSpots", parkingId],
     queryFn: async () => {
       const response = await spotApi.getByParking(parkingId as number, { page: 1, size: 200 });
-      return normalizeSpots(response.data.items);
+      // return normalizeSpots(response.data.items);
+      return response.data.items
     },
     enabled: parkingId != null,
+    refetchInterval: SPOTS_POLL_INTERVAL_MS,
     retry: false,
   });
 

@@ -97,12 +97,12 @@ def get_analytics_service(session: SessionDep) -> AnalyticsService:
 
 async def get_booking_service(
         booking_dao: BookingDAO = Depends(get_booking_dao),
-        spot_dao: SpotDAO = Depends(get_spot_service),
+        spot_service: SpotDAO = Depends(get_spot_service),
         parking_dao: ParkingDAO = Depends(get_parking_dao),
 ) -> BookingService:
     return BookingService(
         booking_dao=booking_dao,
-        spot_dao=spot_dao,
+        spot_service=spot_service,
         parking_dao=parking_dao
     )
 

@@ -5,6 +5,7 @@ import { ParkingMap } from "../components/ParkingMap";
 import { ParkingMarker } from "../components/parking-marker/ParkingMarker";
 import { Settings } from "../components/Settings";
 import { VehicleSearch } from "../components/VehicleSearch";
+import { Bookings } from "../components/Bookings";
 
 export type Screen =
   | "dashboard"
@@ -13,7 +14,8 @@ export type Screen =
   | "analytics"
   | "cameras-network"
   | "parking-marker"
-  | "settings";
+  | "settings"
+  | "bookings";
 
 export const DEFAULT_SCREEN: Screen = "dashboard";
 
@@ -44,6 +46,8 @@ export function renderScreen({ currentScreen, onNavigate }: RenderScreenParams) 
       return <ParkingMarker />;
     case "settings":
       return <Settings />;
+    case "bookings":
+      return <Bookings />;
     default:
       return <Dashboard onNavigate={onNavigate} />;
   }

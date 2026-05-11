@@ -14,6 +14,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
         { label: "Всего мест", value: "-", icon: Car, color: "bg-blue-600" },
         { label: "Свободно", value: "-", icon: Car, color: "bg-green-600" },
         { label: "Занято", value: "-", icon: Car, color: "bg-red-600" },
+        { label: "Забронировано", value: "-", icon: Car, color: "bg-yellow-500" }
       ];
     }
 
@@ -35,6 +36,12 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
         value: String(statsData.occupied),
         icon: Car,
         color: "bg-red-600",
+      },
+      { 
+        label: "Забронировано",
+        value: String(statsData.reserved), 
+        icon: Car, 
+        color: "bg-yellow-500" 
       },
     ];
   }, [statsData]);
@@ -97,7 +104,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
         </Card>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-4 gap-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon;
           return (

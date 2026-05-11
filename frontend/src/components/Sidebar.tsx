@@ -7,6 +7,7 @@ import {
   Settings as SettingsIcon,
   Camera,
   ParkingSquare,
+  CalendarDays,
 } from 'lucide-react';
 import type { Screen } from '../app/screens';
 
@@ -20,6 +21,7 @@ const mainMenuItems = [
   { id: 'parking-map' as Screen, label: 'Карта парковки', icon: Map },
   { id: 'vehicle-search' as Screen, label: 'Поиск транспорта', icon: Search },
   { id: 'analytics' as Screen, label: 'Аналитика', icon: BarChart3 },
+  { id: 'bookings' as Screen, label: 'Журнал бронирований', icon: CalendarDays },
 ];
 
 const toolsMenuItems = [

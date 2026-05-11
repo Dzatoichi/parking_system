@@ -34,6 +34,8 @@ export function ParkingMap() {
         return "bg-red-100 border-red-300 text-red-800";
       default:
         return "bg-gray-100 border-gray-300 text-gray-800";
+      case "reserved":
+        return "bg-yellow-50 border-yellow-300 text-yellow-800";
     }
   };
 

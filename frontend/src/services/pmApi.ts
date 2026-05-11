@@ -84,6 +84,18 @@ export type CameraUpdate = Partial<{
   is_calibrated: boolean;
 }>;
 
+export type BookingStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'expired';
+
+export type BookingRead = {
+  id: number;
+  spot_id: number;
+  user_id: number;
+  start_time: string;
+  end_time: string;
+  status: BookingStatus;
+  created_at: string;
+};
+
 export type SpotStatus = "free" | "occupied" | "reserved";
 export type SpotType = "standard" | "disabled";
 
@@ -193,5 +205,16 @@ export const vehicleApi = {
 export const analyticsApi = {
   getOverview: (parkingId: number) =>
     pmApi.get<AnalyticsOverview>(`/analytics/${parkingId}/overview`),
+};
+
+export const bookingApi = {
+  getAll: (params: {
+    parking_id?: number;
+    status?: BookingStatus;
+    from?: string;
+    to?: string;
+    page?: number;
+    size?: number;
+  }) => pmApi.get<PaginatedResponse<BookingRead>>("/bookings", { params }),
 };
 
