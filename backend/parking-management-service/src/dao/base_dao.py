@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from functools import wraps
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, update, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,6 +90,29 @@ class BaseDAO(Generic[T]):
         async with self._get_session() as session:
             result = await session.execute(stmt)
             return result.scalars().all()
+
+    @with_exception
+    async def get_all_paginated(
+            self,
+            page: int = 1,
+            size: int = 50
+    ) -> tuple[List[T], int]:
+        """Получение всех записей с пагинацией"""
+        offset = (page - 1) * size
+
+        stmt = select(self.model).offset(offset).limit(size)
+        count_stmt = select(func.count()).select_from(self.model)
+
+        async with self._get_session() as session:
+            # Получаем общее количество
+            total_result = await session.execute(count_stmt)
+            total = total_result.scalar()
+
+            # Получаем записи
+            result = await session.execute(stmt)
+            items = result.scalars().all()
+
+            return items, total
 
     @with_exception
     async def update(self, id: int, **kwargs) -> Optional[T]:

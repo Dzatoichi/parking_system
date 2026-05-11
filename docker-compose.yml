@@ -48,6 +48,7 @@ services:
     environment:
       DB_HOST: postgres-parking
       DB_PORT: 5432
+      AUTH_SERVICE_URL: http://auth-service:8003
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "8000:8000"
@@ -140,6 +141,7 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
       VITE_API_PROXY_TARGET: http://parking-management-service:8000
+      VITE_AUTH_API_URL: http://localhost:8003
     ports:
       - "3000:3000"
     volumes:

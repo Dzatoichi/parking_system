@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, status
+from fastapi.params import Depends
 
 from src.schemas import (
     VehicleCreate,
@@ -9,7 +10,7 @@ from src.schemas import (
     VehicleFullInfo,
     PaginatedResponse,
 )
-from src.utils.dependencies import VehicleServiceDep
+from src.utils.dependencies import VehicleServiceDep, get_current_user_id
 
 vehicle_router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
@@ -53,8 +54,9 @@ async def block_vehicle_by_plate(
 async def register_vehicle(
     body: VehicleCreate,
     service: VehicleServiceDep,
+    owner_id: int = Depends(get_current_user_id),
 ) -> VehicleRead:
-    return await service.register_vehicle(body)
+    return await service.register_vehicle(body, owner_id)
 
 
 @vehicle_router.post("/location", response_model=VehicleRead)

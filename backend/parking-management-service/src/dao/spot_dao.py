@@ -1,29 +1,47 @@
 from typing import Optional
 from datetime import datetime, timezone
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, and_
 
+from src.dao.base_dao import BaseDAO
 from src.models.spots import Spot
 from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
 
 
-class SpotDAO:
+class SpotDAO(BaseDAO[Spot]):
     """
-    Data Access Object — весь SQL для работы с парковочными местами.
+    Класс, наследующий базовый класс BaseDAO, для работы
+    с сущностями парковочных мест
     """
 
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    def __init__(self):
+        super().__init__(model=Spot)
 
+    # @BaseDAO.with_exception
+    # async def get_all(
+    #         self,
+    #         parking_id: int | None,
+    #         spot_id: int | None,
+    #         plate_number: int | None,
+    #         status: SpotStatus | None,
+    #         spot_type: SpotType | None,
+    #         start_time: datetime | None,
+    #         end_time: datetime | None,
+    # ) -> list[Spot]:
+    #     """
+    #     Получение всех мест с фильтром по
+    #     параметрам.
+    #     """
+    #     result = await self._session.execute(select(Spot).where(Spot.id == parking_id))
 
-    async def get_by_id(self, spot_id: int) -> Optional[Spot]:
-        result = await self._session.execute(
-            select(Spot).where(Spot.id == spot_id)
-        )
-        return result.scalar_one_or_none()
+    # async def get_by_id(self, spot_id: int) -> Optional[Spot]:
+    #     result = await self._session.execute(
+    #         select(Spot).where(Spot.id == spot_id)
+    #     )
+    #     return result.scalar_one_or_none()
 
+    @BaseDAO.with_exception
     async def get_by_parking(
         self,
         parking_id: int,
@@ -46,72 +64,69 @@ class SpotDAO:
         where_clause = and_(*conditions)
 
         # Запрос данных
-        rows = await self._session.execute(
-            select(Spot)
-            .where(where_clause)
-            .order_by(Spot.spot_number)
-            .offset(offset)
-            .limit(limit)
-        )
+        async with (self._get_session() as session):
+            stmt = select(self.model).where(where_clause).order_by(self.model.spot_number).offset(offset).limit(limit)
+            res = await session.execute(stmt)
 
-        # Запрос общего числа (для пагинации)
-        total_result = await self._session.execute(
-            select(func.count(Spot.id)).where(where_clause)
-        )
+            # Запрос общего числа (для пагинации)
+            total_result = await session.execute(
+                select(func.count(self.model.id)).where(where_clause)
+            )
+            return list(res.scalars().all()), total_result.scalar_one()
 
-        return list(rows.scalars().all()), total_result.scalar_one()
 
+    @BaseDAO.with_exception
     async def get_by_number(self, parking_id: int, spot_number: str) -> Optional[Spot]:
         """Поиск места по номеру (A-01, B12...) внутри конкретной парковки."""
-        result = await self._session.execute(
-            select(Spot).where(
-                and_(Spot.parking_id == parking_id, Spot.spot_number == spot_number)
-            )
-        )
-        return result.scalar_one_or_none()
+        async with (self._get_session() as session):
+            stmt = select(self.model).where(and_(self.model.parking_id == parking_id), (self.model.spot_number == spot_number))
+            res = await session.execute(stmt)
+            return res.scalar_one_or_none()
 
+    @BaseDAO.with_exception
     async def get_by_vehicle(self, vehicle_id: int) -> Optional[Spot]:
         """Найти место, на котором сейчас стоит конкретное авто."""
-        result = await self._session.execute(
-            select(Spot).where(Spot.current_vehicle_id == vehicle_id)
-        )
-        return result.scalar_one_or_none()
+        async with (self._get_session() as session):
+            stmt = select(self.model).where(self.model.current_vehicle_id == vehicle_id)
+            res = await session.execute(stmt)
+            return res.scalar_one_or_none()
 
+    @BaseDAO.with_exception
     async def get_stats(self, parking_id: int) -> dict[str, int]:
         """
         Считает количество мест по каждому статусу одним запросом.
         Вместо денормализованного available_spots в Parking.
         """
-        rows = await self._session.execute(
-            select(Spot.spot_status, func.count(Spot.id))
-            .where(Spot.parking_id == parking_id)
-            .group_by(Spot.spot_status)
-        )
-        counts = {status.value: count for status, count in rows.all()}
+        async with (self._get_session() as session):
+            stmt = select(self.model.spot_status, func.count(self.model.id)
+                          ).where(self.model.parking_id == parking_id).group_by(self.model.spot_status)
+            res = await session.execute(stmt)
+            counts = {status.value: count for status, count in res.all()}
+            return {
+                "free": counts.get(SpotStatus.FREE.value, 0),
+                "occupied": counts.get(SpotStatus.OCCUPIED.value, 0),
+                "reserved": counts.get(SpotStatus.RESERVED.value, 0),
+                "total": sum(counts.values()),
+            }
 
-        # Гарантируем все ключи в ответе
-        return {
-            "free": counts.get(SpotStatus.FREE.value, 0),
-            "occupied": counts.get(SpotStatus.OCCUPIED.value, 0),
-            "reserved": counts.get(SpotStatus.RESERVED.value, 0),
-            "total": sum(counts.values()),
-        }
+    # # WRITE (без commit — только flush в БД-сессию)
+    # async def create(self, spot: Spot) -> Spot:
+    #     self._session.add(spot)
+    #     await self._session.flush()  # получаем id, но не коммитим
+    #     await self._session.refresh(spot)
+    #     return spot
 
-    # WRITE (без commit — только flush в БД-сессию)
-    async def create(self, spot: Spot) -> Spot:
-        self._session.add(spot)
-        await self._session.flush()  # получаем id, но не коммитим
-        await self._session.refresh(spot)
-        return spot
-
+    @BaseDAO.with_exception
     async def create_bulk(self, spots: list[Spot]) -> list[Spot]:
         """Пакетное создание мест (при первичной разметке парковки)."""
-        self._session.add_all(spots)
-        await self._session.flush()
-        for spot in spots:
-            await self._session.refresh(spot)
-        return spots
+        async with (self._get_session() as session):
+            await session.add_all(spots)
+            await session.flush()
+            for spot in spots:
+                await session.refresh(spot)
+            return spots
 
+    @BaseDAO.with_exception
     async def update_status(
         self,
         spot_id: int,
@@ -132,32 +147,27 @@ class SpotDAO:
         elif new_status == SpotStatus.FREE:
             values["occupied_since"] = None
 
-        result = await self._session.execute(
-            update(Spot)
-            .where(Spot.id == spot_id)
-            .values(**values)
-            .returning(Spot)
-        )
-        return result.scalar_one_or_none()
+        async with (self._get_session() as session):
+            stmt = update(self.model).where(self.model.id == spot_id).values(**values).returning(self.model)
+            res = await session.execute(stmt)
+            return res.scalar_one_or_none()
 
+    @BaseDAO.with_exception
     async def update_coordinates(
         self,
         spot_id: int,
         coordinates: dict,
     ) -> Optional[Spot]:
         """Обновление разметки места (после перемаркировки)."""
-        result = await self._session.execute(
-            update(Spot)
-            .where(Spot.id == spot_id)
-            .values(spot_coordinates=coordinates)
-            .returning(Spot)
-        )
-        return result.scalar_one_or_none()
+        async with (self._get_session() as session):
+            stmt = update(self.model).where(self.model.id == spot_id).values(spot_coordinates=coordinates).returning(self.model)
+            res = await session.execute(stmt)
+            return res.scalar_one_or_none()
 
-    async def delete(self, spot_id: int) -> bool:
-        spot = await self.get_by_id(spot_id)
-        if spot is None:
-            return False
-        await self._session.delete(spot)
-        await self._session.flush()
-        return True
+    # async def delete(self, spot_id: int) -> bool:
+    #     spot = await self.get_by_id(spot_id)
+    #     if spot is None:
+    #         return False
+    #     await self._session.delete(spot)
+    #     await self._session.flush()
+    #     return True

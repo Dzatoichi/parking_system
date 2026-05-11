@@ -20,10 +20,9 @@ from src.schemas import (
 
 
 class VehicleService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-        self._dao = VehicleDAO(session)
-        self._tracking_dao = TrackingDAO(session)
+    def __init__(self, vehicle_dao: VehicleDAO, tracking_dao: TrackingDAO) -> None:
+        self._dao = vehicle_dao
+        self._tracking_dao = tracking_dao
 
 
     async def get_vehicle(self, vehicle_id: int) -> VehicleRead:
@@ -58,7 +57,7 @@ class VehicleService:
         return PaginatedResponse.create(items=items, total=total, page=page, size=size)
 
 
-    async def register_vehicle(self, data: VehicleCreate) -> VehicleRead:
+    async def register_vehicle(self, data: VehicleCreate, owner_id: int) -> VehicleRead:
         existing = await self._dao.get_by_plate(data.plate_number)
         if existing is not None:
             raise HTTPException(
@@ -68,6 +67,7 @@ class VehicleService:
 
         vehicle = Vehicles(
             plate_number=data.plate_number,
+            owner_id=owner_id,
             is_inside=False,
         )
         vehicle = await self._dao.create(vehicle)
@@ -118,8 +118,16 @@ class VehicleService:
             event_type=data.event_type,
             bbox=data.bbox.model_dump() if data.bbox else None,
         )
-        await self._tracking_dao.create_event(event)
-        await self._session.commit()
+
+        event_dict = {
+            "vehicle_id": vehicle.id,
+            "camera_id": data.camera_id,
+            "spot_id": data.spot_id,
+            "timestamp": data.timestamp or datetime.now(tz=timezone.utc),
+            "event_type": data.event_type,
+            "bbox": data.bbox.model_dump() if data.bbox else None,
+        }
+        await self._tracking_dao.create(event_dict)
 
         return self._to_read(vehicle)
 
@@ -210,6 +218,7 @@ class VehicleService:
         return VehicleRead(
             id=vehicle.id,
             plate_number=vehicle.plate_number,
+            owner_id=vehicle.owner_id,
             is_inside=bool(vehicle.is_inside),
             is_blocked=bool(getattr(vehicle, "is_blocked", False) or False),
             last_seen=vehicle.last_seen,

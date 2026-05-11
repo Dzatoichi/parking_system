@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str | None = None
 
+    AUTH_SERVICE_URL: str
+
     DB_HOST: str = "localhost"
     DB_PORT: str = "5432"
     DB_USER: str = "parking_user"

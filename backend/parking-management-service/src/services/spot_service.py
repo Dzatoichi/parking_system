@@ -31,12 +31,11 @@ class SpotService:
       - Методы возвращают Pydantic-схемы, а не ORM-объекты
     """
 
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-        self._dao = SpotDAO(session)
-        self._parking_dao = ParkingDAO(session)
+    def __init__(self, spot_dao: SpotDAO, parking_dao: ParkingDAO) -> None:
+        self._dao = spot_dao
+        self._parking_dao = parking_dao
 
-    async def get_spot(self, spot_id: int) -> SpotRead:
+    async def get_spot_by_id(self, spot_id: int) -> SpotRead:
         spot = await self._dao.get_by_id(spot_id)
         if spot is None:
             raise HTTPException(
@@ -45,6 +44,8 @@ class SpotService:
             )
         return SpotRead.model_validate(spot)
 
+
+
     async def get_spots_by_parking(
         self,
         parking_id: int,
@@ -52,7 +53,7 @@ class SpotService:
         filter_type: Optional[SpotType] = None,
         page: int = 1,
         size: int = 50,
-    ) -> PaginatedResponse[SpotReadShort]:
+    ) -> PaginatedResponse[SpotRead]:
         offset = (page - 1) * size
         spots, total = await self._dao.get_by_parking(
             parking_id=parking_id,
@@ -61,7 +62,7 @@ class SpotService:
             offset=offset,
             limit=size,
         )
-        items = [SpotReadShort.model_validate(s) for s in spots]
+        items = [SpotRead.model_validate(s) for s in spots]
         return PaginatedResponse.create(items=items, total=total, page=page, size=size)
 
     async def get_parking_stats(self, parking_id: int) -> ParkingStats:

@@ -16,17 +16,17 @@ from src.schemas.booking_schemas import (
     BookingRead,
     BookingUpdate,
 )
+from src.services.spot_service import SpotService
 
 
 class BookingService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-        self._booking_dao = BookingDAO(session)
-        self._spot_dao = SpotDAO(session)
-        self._parking_dao = ParkingDAO(session)
+    def __init__(self, booking_dao: BookingDAO, spot_service: SpotService, parking_dao: ParkingDAO) -> None:
+        self._booking_dao = booking_dao
+        self._spot_service = spot_service
+        self._parking_dao = parking_dao
 
     async def create_booking(self, booking_create: BookingCreate) -> BookingRead:
-        spot = await self._spot_dao.get_by_id(booking_create.spot_id)
+        spot = await self._spot_service.get_spot_by_id(booking_create.spot_id)
         if spot is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -50,25 +50,35 @@ class BookingService:
                 detail="Место уже забронировано на этот период",
             )
 
-        booking = Booking(
-            user_id=booking_create.user_id,
-            spot_id=booking_create.spot_id,
-            start_time=booking_create.start_time,
-            end_time=booking_create.end_time,
-            status=BookingStatus.PENDING,
-        )
-
-        self._session.add(booking)
-        await self._spot_dao.update_status(spot.id, SpotStatus.RESERVED, vehicle_id=None)
+        booking_dict = {
+            "user_id": booking_create.user_id,
+            "spot_id": booking_create.spot_id,
+            "start_time": booking_create.start_time,
+            "end_time": booking_create.end_time,
+            "status": BookingStatus.PENDING
+        }
+        created_booking = await self._booking_dao.create(booking_dict)
+        upd_spot_status = await self._spot_service.change_status(spot.id, SpotStatus.RESERVED)
         await self._sync_parking_available_spots(spot.parking_id)
-        await self._session.commit()
-        await self._session.refresh(booking)
 
-        return BookingRead.model_validate(booking)
+        return BookingRead.model_validate(booking_dict)
 
     async def get_booking(self, booking_id: int) -> BookingRead:
         booking = await self._get_booking_or_404(booking_id)
         return BookingRead.model_validate(booking)
+
+    async def get_bookings(self, page: int = 1, size: int = 50) -> BookingListResponse:
+        bookings, total = await self._booking_dao.get_all_paginated(page=page, size=size)
+
+        items = [BookingRead.model_validate(booking) for booking in bookings]
+
+        return BookingListResponse.create(
+            items=items,
+            total=total,
+            page=page,
+            size=size
+        )
+
 
     async def get_user_bookings(
         self,
@@ -89,30 +99,43 @@ class BookingService:
             size=size,
         )
 
+    # async def get_all_spots(
+    #         self,
+    #         parking_id: int,
+    # ) -> BookingListResponse:
+    #     """
+    #     Просмотр всех мест с фильтром
+    #     """
+
+
     async def get_available_spots(
         self,
         parking_id: int,
-        start_time: datetime,
-        end_time: datetime,
+        # start_time: datetime,
+        # end_time: datetime,
     ) -> list[AvailableSpotInfo]:
-        spots, _ = await self._spot_dao.get_by_parking(
+        paginated_response = await self._spot_service.get_spots_by_parking(
             parking_id=parking_id,
-            offset=0,
-            limit=1000,
         )
+
+        spots = paginated_response.items
+        total = paginated_response.total
+        page = paginated_response.page
+        size = paginated_response.size
+
 
         available_spots: list[AvailableSpotInfo] = []
         for spot in spots:
             if spot.spot_status == SpotStatus.OCCUPIED:
                 continue
 
-            conflicts = await self._booking_dao.get_conflicting_bookings(
-                spot.id,
-                start_time,
-                end_time,
-            )
-            if conflicts:
-                continue
+            # conflicts = await self._booking_dao.get_conflicting_bookings(
+            #     spot.id,
+            #     start_time,
+            #     end_time,
+            # )
+            # if conflicts:
+            #     continue
 
             available_spots.append(
                 AvailableSpotInfo(
@@ -122,8 +145,8 @@ class BookingService:
                     spot_type=spot.spot_type,
                     current_status=spot.spot_status,
                     spot_coordinates=spot.spot_coordinates,
-                    available_from=start_time,
-                    available_until=end_time,
+                    # available_from=start_time,
+                    # available_until=end_time,
                 )
             )
 

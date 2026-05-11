@@ -58,6 +58,7 @@ class VehicleRead(BaseSchema):
     """
     id: int
     plate_number: str
+    owner_id: int
     is_inside: bool
     is_blocked: bool
     last_seen: Optional[datetime]

@@ -1,6 +1,3 @@
-from typing import Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from src.dao.camera_dao import CameraDAO
@@ -16,10 +13,9 @@ from src.schemas import (
 
 
 class CameraService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-        self._dao = CameraDAO(session)
-        self._parking_dao = ParkingDAO(session)
+    def __init__(self, camera_dao: CameraDAO, parking_dao: ParkingDAO) -> None:
+        self._dao = camera_dao
+        self._parking_dao = parking_dao
 
 
     async def get_camera(self, camera_id: int) -> CameraRead:
@@ -64,8 +60,14 @@ class CameraService:
             position_y=data.position_y,
             status=CameraStatus.ACTIVE,
         )
-        camera = await self._dao.create(camera)
-        await self._session.commit()
+        camera_dict = {
+            "rtsp_url": data.rtsp_url,
+            "parking_id": parking_id,
+            "position_x": data.position_x,
+            "position_y": data.position_y,
+            "status": CameraStatus.ACTIVE,
+        }
+        camera = await self._dao.create(camera_dict)
         return self._to_read(camera)
 
     async def update_camera(self, camera_id: int, data: CameraUpdate) -> CameraRead:
@@ -90,7 +92,6 @@ class CameraService:
                 )
 
         updated = await self._dao.update(camera_id, values)
-        await self._session.commit()
         return self._to_read(updated)
 
     async def delete_camera(self, camera_id: int) -> None:
@@ -101,7 +102,6 @@ class CameraService:
                 detail=f"Камера с id={camera_id} не найдена",
             )
         await self._dao.delete(camera_id)
-        await self._session.commit()
 
 
     @staticmethod

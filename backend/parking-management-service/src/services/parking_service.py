@@ -14,9 +14,8 @@ from src.schemas import (
 
 
 class ParkingService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-        self._dao = ParkingDAO(session)
+    def __init__(self, parking_dao: ParkingDAO) -> None:
+        self._dao = parking_dao
 
 
     async def get_parking(self, parking_id: int) -> ParkingRead:
