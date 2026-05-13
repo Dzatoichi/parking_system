@@ -51,15 +51,16 @@ class AuthServiceClient:
                     detail=f"Auth service unavailable: {str(e)}"
                 )
 
-    async def get_user_by_id(self, user_id: int, token: str) -> Optional[dict]:
+    async def get_user_by_id(self, user_id: int, token: str | None = None) -> Optional[dict]:
         """
         Получение пользователя по ID (для администраторов)
         """
         async with httpx.AsyncClient() as client:
             try:
+                headers = {"Authorization": f"Bearer {token}"} if token else None
                 response = await client.get(
                     f"{self.base_url}/users/{user_id}",
-                    headers={"Authorization": f"Bearer {token}"},
+                    headers=headers,
                     timeout=3.0
                 )
 

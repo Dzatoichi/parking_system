@@ -40,3 +40,12 @@ async def list_users(
 ) -> list[UserReadSchema]:
     users = await auth_service.list_users()
     return [UserReadSchema.model_validate(user) for user in users]
+
+
+@user_router.get("/{user_id}", response_model=UserReadSchema)
+async def get_user_by_id(
+    user_id: int,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> UserReadSchema:
+    user = await auth_service.get_user_by_id(user_id)
+    return UserReadSchema.model_validate(user)

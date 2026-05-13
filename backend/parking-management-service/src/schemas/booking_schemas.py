@@ -39,7 +39,9 @@ class BookingUpdate(BaseSchema):
 class BookingRead(BaseSchema):
     id: int
     user_id: int
+    user_name: str | None = None
     spot_id: int
+    spot_number: str | None = None
     start_time: datetime
     end_time: datetime
     status: BookingStatus

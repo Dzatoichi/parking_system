@@ -50,7 +50,7 @@ class VehicleService:
         size: int = 50,
     ) -> PaginatedResponse[VehicleRead]:
         offset = (page - 1) * size
-        vehicles, total = await self._dao.get_all(
+        vehicles, total = await self._dao.get_all_vehicles(
             only_inside=only_inside, offset=offset, limit=size
         )
         items = [self._to_read(v) for v in vehicles]

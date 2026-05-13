@@ -3,8 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getApiErrorMessage } from "../lib/api";
 import {
   analyticsApi,
+  bookingApi,
   spotApi,
   type AnalyticsOverview,
+  type PaginatedResponse,
+  type BookingRead,
   type ParkingStats,
 } from "../services/pmApi";
 import { useActiveParking } from "./useActiveParking";
@@ -37,9 +40,19 @@ export function useDashboardData() {
     refetchInterval: DASHBOARD_POLL_INTERVAL_MS,
   });
 
+  const bookingsQuery = useQuery<PaginatedResponse<BookingRead>>({
+    queryKey: ["dashboardBookings", parkingId],
+    queryFn: async () => {
+      const response = await bookingApi.getAll({ parking_id: parkingId as number, page: 1, size: 1 });
+      return response.data;
+    },
+    enabled: parkingId != null,
+    refetchInterval: DASHBOARD_POLL_INTERVAL_MS,
+  });
+
   const error =
     getApiErrorMessage(
-      parkingQuery.error ?? statsQuery.error ?? analyticsQuery.error,
+      parkingQuery.error ?? statsQuery.error ?? analyticsQuery.error ?? bookingsQuery.error,
       "Ошибка загрузки данных",
     ) ??
     null;
@@ -52,8 +65,11 @@ export function useDashboardData() {
       parkingQuery.isFetching ||
       statsQuery.isLoading ||
       statsQuery.isFetching ||
+      bookingsQuery.isLoading ||
+      bookingsQuery.isFetching ||
       analyticsQuery.isLoading ||
       analyticsQuery.isFetching,
+    bookingsTotal: bookingsQuery.data?.total ?? 0,
     parking: parkingQuery.data ?? null,
     stats: statsQuery.data ?? null,
   };

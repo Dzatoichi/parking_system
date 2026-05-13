@@ -10,7 +10,7 @@ from alembic import context
 from src.settings.config import settings
 from src.database.base import Base
 
-from src.models import parkings, cameras, spots, vehicles, tracking, booking  # noqa: F401
+from src.models import parkings, cameras, spots, vehicles, tracking, booking, booking_projection  # noqa: F401
 
 config = context.config
 

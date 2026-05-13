@@ -27,24 +27,24 @@ class VehicleDAO(BaseDAO[Vehicles]):
             res = await session.execute(stmt)
             return res.scalar_one_or_none()
 
-    # async def get_all(
-    #     self,
-    #     only_inside: bool = False,
-    #     offset: int = 0,
-    #     limit: int = 100,
-    # ) -> tuple[list[Vehicles], int]:
-    #     query = select(Vehicles)
-    #     count_query = select(func.count(Vehicles.id))
-    #
-    #     if only_inside:
-    #         query = query.where(Vehicles.is_inside == True)
-    #         count_query = count_query.where(Vehicles.is_inside == True)
-    #
-    #     rows = await self._session.execute(
-    #         query.order_by(Vehicles.id).offset(offset).limit(limit)
-    #     )
-    #     total = await self._session.execute(count_query)
-    #     return list(rows.scalars().all()), total.scalar_one()
+    @BaseDAO.with_exception
+    async def get_all_vehicles(
+        self,
+        only_inside: bool = False,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[Vehicles], int]:
+        query = select(Vehicles)
+        count_query = select(func.count(Vehicles.id))
+
+        if only_inside:
+            query = query.where(Vehicles.is_inside == True)
+            count_query = count_query.where(Vehicles.is_inside == True)
+        async with self._get_session() as session:
+            stmt = query.order_by(self.model.id).offset(offset).limit(limit)
+            rows = await session.execute(stmt)
+            total = await session.execute(count_query)
+            return list(rows.scalars().all()), total.scalar_one()
 
 
     # async def create(self, vehicle: Vehicles) -> Vehicles:

@@ -14,6 +14,8 @@ from src.models.vehicles import Vehicles
 
 
 async def seed_demo_data() -> None:
+    demo_owner_id = 1
+
     async with db_helper.async_session_maker() as session:
         existing_count = await session.scalar(select(func.count(ParkingBase.id)))
         if existing_count and existing_count > 0:
@@ -51,6 +53,7 @@ async def seed_demo_data() -> None:
                     is_inside=True,
                     is_blocked=False,
                     last_seen=now_utc_naive - timedelta(minutes=idx * 4 + 3),
+                    owner_id=demo_owner_id,
                 )
             )
         for idx, plate in enumerate(outside_plates):
@@ -60,6 +63,7 @@ async def seed_demo_data() -> None:
                     is_inside=False,
                     is_blocked=False,
                     last_seen=now_utc_naive - timedelta(hours=idx + 2),
+                    owner_id=demo_owner_id,
                 )
             )
         for idx, plate in enumerate(blocked_plates):
@@ -69,6 +73,7 @@ async def seed_demo_data() -> None:
                     is_inside=False,
                     is_blocked=True,
                     last_seen=now_utc_naive - timedelta(days=idx + 1, hours=2),
+                    owner_id=demo_owner_id,
                 )
             )
         session.add_all(vehicles)

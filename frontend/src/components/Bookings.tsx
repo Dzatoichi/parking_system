@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useBookingsData } from '../hooks/useBookingsData';
-import type { BookingStatus } from '../api/pmApi';
+import type { BookingStatus } from '../services/pmApi';
 
 const statusColors: Record<BookingStatus, string> = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -179,10 +179,10 @@ export function Bookings() {
                         {booking.id}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {booking.spot_id}
+                        {booking.spot_number ?? `ID ${booking.spot_id}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {booking.user_id}
+                        {booking.user_name ?? `ID ${booking.user_id}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {new Date(booking.start_time).toLocaleString()}

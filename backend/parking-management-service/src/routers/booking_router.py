@@ -1,9 +1,7 @@
 from datetime import datetime
-from typing import Any, Coroutine
 
 from fastapi import APIRouter, Query, status
 
-from src.dao.booking_dao import BookingDAO
 from src.schemas.booking_schemas import (
     AvailableSpotInfo,
     BookingCreate,
@@ -11,7 +9,8 @@ from src.schemas.booking_schemas import (
     BookingRead,
     BookingUpdate,
 )
-from src.utils.dependencies import BookingServiceDep, BookingDaoDep
+from src.models.status.booking_status import BookingStatus
+from src.utils.dependencies import BookingServiceDep
 
 booking_router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -36,14 +35,24 @@ async def create_booking(
 )
 async def get_bookings(
         booking_service: BookingServiceDep,
-        page: int = 1,
-        size: int = 50,
-) -> None:
+        parking_id: int | None = Query(default=None),
+        status: BookingStatus | None = Query(default=None),
+        from_: datetime | None = Query(default=None, alias="from"),
+        to: datetime | None = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        size: int = Query(default=50, ge=1, le=200),
+) -> BookingListResponse:
     """
     Просмотр всех мест с филтрацией.
     """
-    spots = await booking_service.get_bookings(page=page, size=size)
-    return spots
+    return await booking_service.get_bookings(
+        page=page,
+        size=size,
+        parking_id=parking_id,
+        status_filter=status,
+        start_from=from_,
+        end_to=to,
+    )
 
 
 @booking_router.get(
@@ -86,7 +95,7 @@ async def update_booking(
 
 
 @booking_router.get(
-    "get_available",
+    "/get_available",
     response_model=list[AvailableSpotInfo],
     summary="Получить доступные места для бронирования",
 )

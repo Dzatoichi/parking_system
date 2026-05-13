@@ -35,6 +35,18 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   parking-management-service:
     build:
       context: ./backend/parking-management-service
@@ -43,12 +55,15 @@ services:
     depends_on:
       postgres-parking:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     env_file:
       - ./backend/parking-management-service/.env
     environment:
       DB_HOST: postgres-parking
       DB_PORT: 5432
       AUTH_SERVICE_URL: http://auth-service:8003
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "8000:8000"

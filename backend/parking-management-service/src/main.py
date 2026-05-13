@@ -1,7 +1,12 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
+from src.brokers.rabbitmq import BookingEventBroker
+from src.clients.auth_client import AuthServiceClient
+from src.dao.booking_dao import BookingDAO
+from src.dao.booking_projection_dao import BookingProjectionDAO
 from src.routers.booking_router import booking_router
 from src.routers.spot_router import spot_router
 from src.routers.parking_router import parking_router
@@ -10,11 +15,24 @@ from src.routers.vehicle_router import vehicle_router
 from src.routers.health_router import health_router
 from src.routers.analytics_router import analytics_router
 from src.database.seed import seed_demo_data
+from src.services.booking_projection_service import BookingProjectionService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await seed_demo_data()
+    broker = BookingEventBroker()
+    projection_service = BookingProjectionService(
+        projection_dao=BookingProjectionDAO(),
+        booking_dao=BookingDAO(),
+        auth_client=AuthServiceClient(),
+    )
+    await projection_service.rebuild_projection()
+    consumer_task = asyncio.create_task(broker.consume(projection_service.apply_event))
     yield
+    consumer_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await consumer_task
+    await broker.close()
 
 app = FastAPI(title="Parking Management Service", lifespan=lifespan)
 

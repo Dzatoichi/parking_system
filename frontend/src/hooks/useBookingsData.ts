@@ -1,5 +1,8 @@
-import { useState, useEffect } from 'react';
-import { bookingApi, type BookingStatus, type BookingRead, type PaginatedResponse } from '../services/pmApi';
+import { useQuery } from "@tanstack/react-query";
+
+import { getApiErrorMessage } from "../lib/api";
+import { bookingApi, type BookingStatus, type BookingRead, type PaginatedResponse } from "../services/pmApi";
+import { useActiveParking } from "./useActiveParking";
 
 interface UseBookingsDataParams {
   status?: BookingStatus;
@@ -13,8 +16,10 @@ interface UseBookingsDataReturn {
   data: PaginatedResponse<BookingRead> | null;
   loading: boolean;
   error: string | null;
-  refetch: () => void;
+  refetch: () => Promise<void>;
 }
+
+const BOOKINGS_POLL_INTERVAL_MS = 30_000;
 
 export function useBookingsData({
   status,
@@ -23,45 +28,36 @@ export function useBookingsData({
   page = 1,
   size = 20,
 }: UseBookingsDataParams): UseBookingsDataReturn {
-  const [data, setData] = useState<PaginatedResponse<BookingRead> | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const parkingQuery = useActiveParking();
+  const parkingId = parkingQuery.data?.id ?? null;
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const params: any = {
+  const bookingsQuery = useQuery<PaginatedResponse<BookingRead>>({
+    queryKey: ["bookings", parkingId, status, from, to, page, size],
+    queryFn: async () => {
+      const response = await bookingApi.getAll({
+        parking_id: parkingId ?? undefined,
+        status,
+        from,
+        to,
         page,
         size,
-      };
+      });
+      return response.data;
+    },
+    enabled: parkingId != null,
+    refetchInterval: BOOKINGS_POLL_INTERVAL_MS,
+  });
 
-      if (status) params.status = status;
-      if (from) params.from = from;
-      if (to) params.to = to;
-
-      const response = await bookingApi.getAll(params);
-      setData(response.data);
-    } catch (err: any) {
-      setError(err.message || 'Ошибка загрузки данных');
-      console.error('Error fetching bookings:', err);
-    } finally {
-      setLoading(false);
-    }
+  return {
+    data: bookingsQuery.data ?? null,
+    loading:
+      parkingQuery.isLoading ||
+      parkingQuery.isFetching ||
+      bookingsQuery.isLoading ||
+      bookingsQuery.isFetching,
+    error: getApiErrorMessage(bookingsQuery.error ?? parkingQuery.error, "Ошибка загрузки данных"),
+    refetch: async () => {
+      await Promise.all([parkingQuery.refetch(), bookingsQuery.refetch()]);
+    },
   };
-
-  useEffect(() => {
-    fetchData();
-  }, [status, from, to, page, size]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchData();
-    }, 30000); // 30 seconds
-
-    return () => clearInterval(interval);
-  }, [status, from, to, page, size]);
-
-  return { data, loading, error, refetch: fetchData };
 }

@@ -6,7 +6,7 @@ import { useDashboardData } from "../hooks/useDashboardData";
 import { Card } from "./ui/card";
 
 export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => void }) {
-  const { analytics, error, loading, parking, stats: statsData } = useDashboardData();
+  const { analytics, bookingsTotal, error, loading, parking, stats: statsData } = useDashboardData();
 
   const stats = useMemo(() => {
     if (!statsData) {
@@ -14,7 +14,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
         { label: "Всего мест", value: "-", icon: Car, color: "bg-blue-600" },
         { label: "Свободно", value: "-", icon: Car, color: "bg-green-600" },
         { label: "Занято", value: "-", icon: Car, color: "bg-red-600" },
-        { label: "Забронировано", value: "-", icon: Car, color: "bg-yellow-500" }
+        { label: "Бронирований", value: "-", icon: Car, color: "bg-yellow-500" }
       ];
     }
 
@@ -38,13 +38,13 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
         color: "bg-red-600",
       },
       { 
-        label: "Забронировано",
-        value: String(statsData.reserved), 
+        label: "Бронирований",
+        value: String(bookingsTotal),
         icon: Car, 
         color: "bg-yellow-500" 
       },
     ];
-  }, [statsData]);
+  }, [bookingsTotal, statsData]);
 
   const recentEvents = analytics?.recent_events ?? [];
   const miniParkingSpots = analytics?.mini_spots ?? [];

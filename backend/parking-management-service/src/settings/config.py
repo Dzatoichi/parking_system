@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
 
     AUTH_SERVICE_URL: str
+    RABBITMQ_URL: str = "amqp://guest:guest@rabbitmq:5672/"
+    BOOKING_EVENTS_EXCHANGE: str = "booking.events"
+    BOOKING_EVENTS_QUEUE: str = "booking.projection"
 
     DB_HOST: str = "localhost"
     DB_PORT: str = "5432"

@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.orm import selectinload
 
 
 from src.dao.base_dao import BaseDAO
 from src.models.booking import Booking
 from src.models.status.booking_status import BookingStatus
+from src.models.spots import Spot
 
 
 class BookingDAO(BaseDAO[Booking]):
@@ -89,3 +91,50 @@ class BookingDAO(BaseDAO[Booking]):
                 )
             res = await session.execute(stmt)
             return list(res.scalars().all())
+
+    @BaseDAO.with_exception
+    async def get_all_with_spot(self) -> list[Booking]:
+        async with self._get_session() as session:
+            rows = await session.execute(
+                select(self.model).options(selectinload(self.model.spot)).order_by(self.model.created_at.desc())
+            )
+            return list(rows.scalars().all())
+
+    @BaseDAO.with_exception
+    async def get_paginated(
+        self,
+        page: int = 1,
+        size: int = 50,
+        *,
+        parking_id: int | None = None,
+        status_filter: BookingStatus | None = None,
+        start_from: datetime | None = None,
+        end_to: datetime | None = None,
+    ) -> tuple[list[Booking], int]:
+        offset = (page - 1) * size
+
+        query = select(self.model).options(selectinload(self.model.spot))
+        count_query = select(func.count(self.model.id))
+
+        if parking_id is not None:
+            query = query.join(Spot, Spot.id == self.model.spot_id).where(Spot.parking_id == parking_id)
+            count_query = count_query.join(Spot, Spot.id == self.model.spot_id).where(Spot.parking_id == parking_id)
+
+        if status_filter is not None:
+            query = query.where(self.model.status == status_filter)
+            count_query = count_query.where(self.model.status == status_filter)
+
+        if start_from is not None:
+            query = query.where(self.model.start_time >= start_from)
+            count_query = count_query.where(self.model.start_time >= start_from)
+
+        if end_to is not None:
+            query = query.where(self.model.end_time <= end_to)
+            count_query = count_query.where(self.model.end_time <= end_to)
+
+        query = query.order_by(self.model.created_at.desc()).offset(offset).limit(size)
+
+        async with self._get_session() as session:
+            rows = await session.execute(query)
+            total = await session.execute(count_query)
+            return list(rows.scalars().all()), total.scalar_one()

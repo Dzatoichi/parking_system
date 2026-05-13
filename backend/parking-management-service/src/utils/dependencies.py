@@ -11,14 +11,17 @@ from fastapi import Depends, security, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.brokers.rabbitmq import BookingEventBroker
 from src.clients.auth_client import AuthServiceClient
 from src.dao.booking_dao import BookingDAO
+from src.dao.booking_projection_dao import BookingProjectionDAO
 from src.dao.camera_dao import CameraDAO
 from src.dao.parking_dao import ParkingDAO
 from src.dao.spot_dao import SpotDAO
 from src.dao.vehicle_dao import VehicleDAO, TrackingDAO
 from src.database.base import db_helper
 from src.services.booking_service import BookingService
+from src.services.booking_projection_service import BookingProjectionService
 from src.services.spot_service import SpotService
 from src.services.parking_service import ParkingService
 from src.services.camera_service import CameraService
@@ -45,6 +48,9 @@ def get_parking_dao():
 def get_booking_dao():
     return BookingDAO()
 
+def get_booking_projection_dao():
+    return BookingProjectionDAO()
+
 def get_camera_dao():
     return CameraDAO()
 
@@ -53,6 +59,12 @@ def get_vehicle_dao():
 
 def get_tracking_dao():
     return TrackingDAO()
+
+def get_auth_client() -> AuthServiceClient:
+    return AuthServiceClient()
+
+def get_booking_event_broker() -> BookingEventBroker:
+    return BookingEventBroker()
 
 
 
@@ -97,13 +109,28 @@ def get_analytics_service(session: SessionDep) -> AnalyticsService:
 
 async def get_booking_service(
         booking_dao: BookingDAO = Depends(get_booking_dao),
-        spot_service: SpotDAO = Depends(get_spot_service),
+        spot_dao: SpotDAO = Depends(get_spots_dao),
         parking_dao: ParkingDAO = Depends(get_parking_dao),
+        projection_dao: BookingProjectionDAO = Depends(get_booking_projection_dao),
+        event_broker: BookingEventBroker = Depends(get_booking_event_broker),
 ) -> BookingService:
     return BookingService(
         booking_dao=booking_dao,
-        spot_service=spot_service,
-        parking_dao=parking_dao
+        spot_dao=spot_dao,
+        parking_dao=parking_dao,
+        projection_dao=projection_dao,
+        event_broker=event_broker,
+    )
+
+async def get_booking_projection_service(
+        projection_dao: BookingProjectionDAO = Depends(get_booking_projection_dao),
+        booking_dao: BookingDAO = Depends(get_booking_dao),
+        auth_client: AuthServiceClient = Depends(get_auth_client),
+) -> BookingProjectionService:
+    return BookingProjectionService(
+        projection_dao=projection_dao,
+        booking_dao=booking_dao,
+        auth_client=auth_client,
     )
 
 
@@ -135,9 +162,11 @@ CameraServiceDep  = Annotated[CameraService,  Depends(get_camera_service)]
 VehicleServiceDep = Annotated[VehicleService, Depends(get_vehicle_service)]
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
 BookingServiceDep = Annotated[BookingService, Depends(get_booking_service)]
+BookingProjectionServiceDep = Annotated[BookingProjectionService, Depends(get_booking_projection_service)]
 
 # DAO
 BookingDaoDep = Annotated[BookingDAO,Depends(get_booking_dao)]
+BookingProjectionDaoDep = Annotated[BookingProjectionDAO, Depends(get_booking_projection_dao)]
 SpotDaoDep = Annotated[SpotDAO, Depends(get_spots_dao)]
 ParkingDaoDep = Annotated[ParkingDAO, Depends(get_parking_dao)]
 VehicleDaoDep = Annotated[VehicleDAO, Depends(get_vehicle_dao)]

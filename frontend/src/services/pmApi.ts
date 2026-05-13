@@ -89,11 +89,14 @@ export type BookingStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' 
 export type BookingRead = {
   id: number;
   spot_id: number;
+  spot_number: string | null;
   user_id: number;
+  user_name: string | null;
   start_time: string;
   end_time: string;
   status: BookingStatus;
   created_at: string;
+  updated_at: string;
 };
 
 export type SpotStatus = "free" | "occupied" | "reserved";
