@@ -49,17 +49,25 @@ class ParkingService:
                 detail=f"Парковка с именем '{data.name}' уже существует",
             )
 
-        parking = ParkingBase(
-            name=data.name,
-            address=data.address,
-            total_spots=data.total_spots,
-            available_spots=data.total_spots,  # изначально все свободны
-            coordinates=data.coordinates,
-            boundaries=data.boundaries,
-            settings=data.settings,
-        )
-        parking = await self._dao.create(parking)
-        await self._session.commit()
+        # parking = ParkingBase(
+        #     name=data.name,
+        #     address=data.address,
+        #     total_spots=data.total_spots,
+        #     available_spots=data.total_spots,  # изначально все свободны
+        #     coordinates=data.coordinates,
+        #     boundaries=data.boundaries,
+        #     settings=data.settings,
+        # )
+        parking_dict = {
+            "name": data.name,
+            "address": data.address,
+            "total_spots": data.total_spots,
+            "available_spots": data.total_spots,
+            "coordinates": data.coordinates,
+            "boundaries": data.boundaries,
+            "settings": data.settings,
+        }
+        parking = await self._dao.create(parking_dict)
         return self._to_read(parking)
 
     async def update_parking(self, parking_id: int, data: ParkingUpdate) -> ParkingRead:
@@ -76,7 +84,6 @@ class ParkingService:
             return self._to_read(existing)
 
         updated = await self._dao.update(parking_id, values)
-        await self._session.commit()
         return self._to_read(updated)
 
     async def delete_parking(self, parking_id: int) -> None:
@@ -87,7 +94,6 @@ class ParkingService:
                 detail=f"Парковка с id={parking_id} не найдена",
             )
         await self._dao.delete(parking_id)
-        await self._session.commit()
 
 
     @staticmethod

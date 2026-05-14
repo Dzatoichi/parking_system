@@ -89,16 +89,22 @@ class SpotService:
                 detail=f"Место с номером '{data.spot_number}' уже существует на этой парковке",
             )
 
-        spot = Spot(
-            parking_id=parking_id,
-            spot_number=data.spot_number,
-            spot_type=data.spot_type,
-            spot_status=SpotStatus.FREE,
-            spot_coordinates=data.spot_coordinates.model_dump(),
-        )
+        # spot = Spot(
+        #     parking_id=parking_id,
+        #     spot_number=data.spot_number,
+        #     spot_type=data.spot_type,
+        #     spot_status=SpotStatus.FREE,
+        #     spot_coordinates=data.spot_coordinates.model_dump(),
+        # )
+        spot_dict = {
+            "parking_id": parking_id,
+            "spot_number": data.spot_number,
+            "spot_type": data.spot_type,
+            "spot_status": SpotStatus.FREE,
+            "spot_coordinates": data.spot_coordinates.model_dump(),
+        }
 
-        spot = await self._dao.create(spot)
-        await self._session.commit()
+        spot = await self._dao.create(spot_dict)
         return SpotRead.model_validate(spot)
 
     async def create_spots_bulk(
@@ -139,7 +145,6 @@ class SpotService:
         ]
 
         created = await self._dao.create_bulk(spots)
-        await self._session.commit()
         return [SpotRead.model_validate(s) for s in created]
 
 
@@ -176,7 +181,6 @@ class SpotService:
         )
         stats = await self._dao.get_stats(spot.parking_id)
         await self._parking_dao.update(spot.parking_id, {"available_spots": stats["free"]})
-        await self._session.commit()
         return SpotRead.model_validate(updated)
 
     async def update_coordinates(
@@ -205,7 +209,6 @@ class SpotService:
             spot_id=spot_id,
             coordinates=data.spot_coordinates.model_dump(),
         )
-        await self._session.commit()
         return SpotRead.model_validate(updated)
 
 
@@ -224,4 +227,3 @@ class SpotService:
             )
 
         await self._dao.delete(spot_id)
-        await self._session.commit()

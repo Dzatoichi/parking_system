@@ -78,13 +78,17 @@ class VehicleService:
                 detail=f"Автомобиль '{data.plate_number}' уже зарегистрирован",
             )
 
-        vehicle = Vehicles(
-            plate_number=data.plate_number,
-            owner_id=owner_id,
-            is_inside=False,
-        )
-        vehicle = await self._dao.create(vehicle)
-        await self._session.commit()
+        # vehicle = Vehicles(
+        #     plate_number=data.plate_number,
+        #     owner_id=owner_id,
+        #     is_inside=False,
+        # )
+        vehicle_dict = {
+            "plate_number": data.plate_number,
+            "owner_id": owner_id,
+            "is_inside": False,
+        }
+        vehicle = await self._dao.create(vehicle_dict)
         return self._to_read(vehicle)
 
     async def process_location_event(self, data: VehicleLocationUpdate) -> VehicleRead:
@@ -99,11 +103,15 @@ class VehicleService:
             if data.event_type == "enter":
                 # Для незарегистрированного авто не блокируем вход автоматически.
                 pass
-            vehicle = Vehicles(
-                plate_number=data.plate_number,
-                is_inside=data.event_type == "enter",
-            )
-            vehicle = await self._dao.create(vehicle)
+            # vehicle = Vehicles(
+            #     plate_number=data.plate_number,
+            #     is_inside=data.event_type == "enter",
+            # )
+            vehicle_dict = {
+                "plate_number": data.plate_number,
+                "is_inside": data.event_type == "enter",
+            }
+            vehicle = await self._dao.create(vehicle_dict)
         else:
             if vehicle.is_blocked and data.event_type == "enter":
                 raise HTTPException(
@@ -156,7 +164,6 @@ class VehicleService:
                 detail=f"Автомобиль с номером '{plate_number}' не найден",
             )
         updated = await self._dao.set_blocked(vehicle.id, body.blocked)
-        await self._session.commit()
         return self._to_read(updated)
 
     async def delete_vehicle(self, vehicle_id: int) -> None:
@@ -172,7 +179,6 @@ class VehicleService:
                 detail="Нельзя удалить автомобиль, который находится на парковке",
             )
         await self._dao.delete(vehicle_id)
-        await self._session.commit()
 
 
     async def get_vehicle_history(
