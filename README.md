@@ -67,6 +67,7 @@
 | `cv-processing-service` | Обработка CV-задач: запуск нейросетевых моделей, распознавание номеров, embeddings |
 | `stream-ingest-service` | Приём и маршрутизация видеопотоков с камер (RTSP) в cv-processing |
 | `analytics-service` | Аналитика и отчёты по загрузке и статистике парковки |
+| `device-emulator-service` | Эмуляция внешних устройств (шлагбаум, освещение), журнал команд для интеграции и приёмки |
 | `api-gateway` | Nginx reverse proxy — единая точка входа для фронтенда |
 | `frontend` | React SPA — веб-интерфейс оператора |
 
@@ -120,6 +121,9 @@
     │           ├── routers/
     │           └── repositories/
     ├── stream-ingest-service/
+    │   ├── Dockerfile
+    │   └── src/
+    ├── device-emulator-service/
     │   ├── Dockerfile
     │   └── src/
     ├── analytics-service/
@@ -178,6 +182,7 @@ docker compose down -v
 | parking-management-service | 8000 | http://localhost:8000 |
 | cv-processing-service | 8001 | http://localhost:8001 |
 | stream-ingest-service | 8002 | http://localhost:8002 |
+| device-emulator-service | 8004 | http://localhost:8004 |
 | PostgreSQL | 5432 | localhost:5432 |
 
 ### Health checks
@@ -186,6 +191,7 @@ docker compose down -v
 curl http://localhost:8000/health   # parking-management-service
 curl http://localhost:8001/health   # cv-processing-service
 curl http://localhost:8002/health   # stream-ingest-service
+curl http://localhost:8004/health   # device-emulator-service (шлагбаум/свет, эмулятор)
 ```
 
 ---
@@ -197,6 +203,7 @@ curl http://localhost:8002/health   # stream-ingest-service
 - **parking-management-service**: http://localhost:8000/docs
 - **cv-processing-service**: http://localhost:8001/docs
 - **stream-ingest-service**: http://localhost:8002/docs
+- **device-emulator-service**: http://localhost:8004/docs — эмуляция шлагбаума и освещения, журнал интеграции
 
 ### Пример: создать задачу на обработку видеопотока
 

@@ -145,6 +145,26 @@ services:
     volumes:
       - ./backend/stream-ingest-service:/app
 
+  device-emulator-service:
+    build:
+      context: ./backend/device-emulator-service
+      dockerfile: Dockerfile
+    container_name: device-emulator-service
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+      SQLITE_PATH: sqlite+aiosqlite:////app/data/emulator.db
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - ./backend/device-emulator-service/data:/app/data
+      - ./backend/device-emulator-service/src:/app/src
+
   frontend:
     build:
       context: ./frontend/src
@@ -153,9 +173,12 @@ services:
     depends_on:
       parking-management-service:
         condition: service_healthy
+      device-emulator-service:
+        condition: service_healthy
     environment:
       CHOKIDAR_USEPOLLING: "true"
       VITE_API_PROXY_TARGET: http://parking-management-service:8000
+      VITE_EMULATOR_PROXY_TARGET: http://device-emulator-service:8004
       VITE_AUTH_API_URL: http://localhost:8003
     ports:
       - "3000:3000"

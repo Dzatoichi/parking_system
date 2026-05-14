@@ -64,6 +64,12 @@
           secure: false,
           rewrite: (path) => path.replace(/^\/api/, ""),
         },
+        "/emulator": {
+          target: process.env.VITE_EMULATOR_PROXY_TARGET || "http://localhost:8004",
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/emulator/, ""),
+        },
       },
     },
   });
