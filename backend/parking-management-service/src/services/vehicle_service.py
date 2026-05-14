@@ -43,6 +43,19 @@ class VehicleService:
             )
         return self._to_read(vehicle)
 
+    async def get_vehicle_me(
+            self,
+            owner_id: int
+    ) -> list[VehicleRead] | None:
+        vehicles = await self._dao.get_vehicle_me(owner_id)
+        if vehicles is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Автомобиль с пользователем id={owner_id} не найден",
+            )
+        return [self._to_read(v) for v in vehicles]
+
+
     async def get_all_vehicles(
         self,
         only_inside: bool = False,

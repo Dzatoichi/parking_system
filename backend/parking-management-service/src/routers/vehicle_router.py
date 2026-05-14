@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query, status
 from fastapi.params import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.schemas import (
     VehicleCreate,
@@ -13,7 +14,7 @@ from src.schemas import (
 from src.utils.dependencies import VehicleServiceDep, get_current_user_id
 
 vehicle_router = APIRouter(prefix="/vehicles", tags=["vehicles"])
-
+bearer_scheme = HTTPBearer(auto_error=False)
 
 @vehicle_router.get("", response_model=PaginatedResponse[VehicleRead])
 async def get_vehicles(
@@ -24,6 +25,12 @@ async def get_vehicles(
 ) -> PaginatedResponse[VehicleRead]:
     return await service.get_all_vehicles(only_inside=only_inside, page=page, size=size)
 
+@vehicle_router.get("/me", response_model=list[VehicleRead])
+async def get_vehicle_me(
+        service: VehicleServiceDep,
+        owner_id: int = Depends(get_current_user_id),
+) -> list[VehicleRead] | None:
+    return await service.get_vehicle_me(owner_id=owner_id)
 
 @vehicle_router.get("/{vehicle_id}", response_model=VehicleRead)
 async def get_vehicle(

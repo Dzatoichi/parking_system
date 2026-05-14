@@ -21,6 +21,16 @@ class VehicleDAO(BaseDAO[Vehicles]):
     #     return result.scalar_one_or_none()
 
     @BaseDAO.with_exception
+    async def get_vehicle_me(
+            self,
+            user_id: int,
+    ) -> list[Vehicles] | None:
+        async with self._get_session() as session:
+            stmt = select(self.model).where(self.model.owner_id == user_id)
+            res = await session.execute(stmt)
+            return list(res.scalars().all())
+
+    @BaseDAO.with_exception
     async def get_by_plate(self, plate_number: str) -> Optional[Vehicles]:
         async with self._get_session() as session:
             stmt = select(self.model).where(self.model.plate_number == plate_number)
