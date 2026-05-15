@@ -180,7 +180,7 @@ class SpotService:
             vehicle_id=data.vehicle_id,
         )
         stats = await self._dao.get_stats(spot.parking_id)
-        await self._parking_dao.update(spot.parking_id, {"available_spots": stats["free"]})
+        await self._parking_dao.update(spot.parking_id, available_spots=stats["free"])
         return SpotRead.model_validate(updated)
 
     async def update_coordinates(

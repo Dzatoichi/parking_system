@@ -14,6 +14,33 @@ from src.utils.dependencies import BookingServiceDep
 
 booking_router = APIRouter(prefix="/bookings", tags=["bookings"])
 
+@booking_router.get(
+    "/get_available",
+    response_model=list[AvailableSpotInfo],
+    summary="Получить доступные места для бронирования",
+)
+async def get_available_spots(
+    parking_id: int,
+    service: BookingServiceDep,
+    # start_time: datetime = Query(...),
+    # end_time: datetime = Query(...),
+) -> list[AvailableSpotInfo]:
+    return await service.get_available_spots(parking_id,)
+
+
+@booking_router.get(
+    "/me",
+    response_model=BookingListResponse,
+    summary="Активные бронирования текущего пользователя",
+)
+async def get_my_bookings(
+    service: BookingServiceDep,
+    user_id: int = Query(..., description="ID пользователя"),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+) -> BookingListResponse:
+    return await service.get_user_bookings(user_id, page, size)
+
 
 @booking_router.post(
     "",
@@ -56,9 +83,21 @@ async def get_bookings(
 
 
 @booking_router.get(
-    "/{user_id}",
+    "/detail/{booking_id}",
+    response_model=BookingRead,
+    summary="Получить детали бронирования по его id",
+)
+async def get_booking(
+    booking_id: int,
+    service: BookingServiceDep,
+) -> BookingRead:
+    return await service.get_booking(booking_id)
+
+
+@booking_router.get(
+    "/user/{user_id}",
     response_model=BookingListResponse,
-    summary="Получить бронирования пользователя",
+    summary="Получить бронирования пользователя по его id",
 )
 async def get_user_bookings(
     user_id: int,
@@ -68,15 +107,14 @@ async def get_user_bookings(
 ) -> BookingListResponse:
     return await service.get_user_bookings(user_id, page, size)
 
-
 @booking_router.get(
-    "/detail/{booking_id}",
+    path="/{booking_id}",
     response_model=BookingRead,
-    summary="Получить детали бронирования",
+    summary="Получить бронирование по id",
 )
 async def get_booking(
-    booking_id: int,
-    service: BookingServiceDep,
+        booking_id: int,
+        service: BookingServiceDep,
 ) -> BookingRead:
     return await service.get_booking(booking_id)
 
@@ -93,18 +131,5 @@ async def update_booking(
 ) -> BookingRead:
     return await service.update_booking(booking_id, body)
 
-
-@booking_router.get(
-    "/get_available",
-    response_model=list[AvailableSpotInfo],
-    summary="Получить доступные места для бронирования",
-)
-async def get_available_spots(
-    parking_id: int,
-    service: BookingServiceDep,
-    # start_time: datetime = Query(...),
-    # end_time: datetime = Query(...),
-) -> list[AvailableSpotInfo]:
-    return await service.get_available_spots(parking_id,)
 
 

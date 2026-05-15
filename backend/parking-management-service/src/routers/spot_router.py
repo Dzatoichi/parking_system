@@ -128,3 +128,14 @@ async def delete_spot(
     service: SpotServiceDep,
 ) -> None:
     await service.delete_spot(spot_id)
+
+# @spot_router.get(
+#     path="/{parking_id}/map",
+#     response_model=list[SpotRead],
+#     summary="Получение возвращает список мест с координатами",
+# )
+# async def get_spot_map(
+#         parking_id: int,
+#         service: SpotServiceDep,
+# ) -> list[SpotRead]:
+#     return await service.get_spot_map(parking_id)

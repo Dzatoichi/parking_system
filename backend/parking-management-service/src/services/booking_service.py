@@ -65,7 +65,7 @@ class BookingService:
                 "spot_id": booking_create.spot_id,
                 "start_time": booking_create.start_time,
                 "end_time": booking_create.end_time,
-                "status": BookingStatus.PENDING,
+                "status": BookingStatus.CONFIRMED,
             }
         )
         await self._spot_dao.update_status(spot.id, SpotStatus.RESERVED, vehicle_id=spot.current_vehicle_id)

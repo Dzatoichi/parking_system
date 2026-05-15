@@ -150,7 +150,9 @@ class SpotDAO(BaseDAO[Spot]):
         async with (self._get_session() as session):
             stmt = update(self.model).where(self.model.id == spot_id).values(**values).returning(self.model)
             res = await session.execute(stmt)
-            return res.scalar_one_or_none()
+            updated = res.scalar_one_or_none()
+            await session.commit()
+            return updated
 
     @BaseDAO.with_exception
     async def update_coordinates(
