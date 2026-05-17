@@ -16,12 +16,14 @@ from src.clients.auth_client import AuthServiceClient
 from src.dao.booking_dao import BookingDAO
 from src.dao.booking_projection_dao import BookingProjectionDAO
 from src.dao.camera_dao import CameraDAO
+from src.dao.event_dao import EventDAO
 from src.dao.parking_dao import ParkingDAO
 from src.dao.spot_dao import SpotDAO
 from src.dao.vehicle_dao import VehicleDAO, TrackingDAO
 from src.database.base import db_helper
 from src.services.booking_service import BookingService
 from src.services.booking_projection_service import BookingProjectionService
+from src.services.event_service import EventService
 from src.services.spot_service import SpotService
 from src.services.parking_service import ParkingService
 from src.services.camera_service import CameraService
@@ -66,6 +68,9 @@ def get_auth_client() -> AuthServiceClient:
 def get_booking_event_broker() -> BookingEventBroker:
     return BookingEventBroker()
 
+def get_event_dao():
+    return EventDAO()
+
 
 
 
@@ -106,6 +111,11 @@ def get_vehicle_service(
 
 def get_analytics_service(session: SessionDep) -> AnalyticsService:
     return AnalyticsService(session)
+
+def get_event_service(
+        event_dao: EventDAO = Depends(get_event_dao),
+) -> EventService:
+    return EventService(event_dao=event_dao)
 
 async def get_booking_service(
         booking_dao: BookingDAO = Depends(get_booking_dao),
@@ -163,6 +173,7 @@ VehicleServiceDep = Annotated[VehicleService, Depends(get_vehicle_service)]
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
 BookingServiceDep = Annotated[BookingService, Depends(get_booking_service)]
 BookingProjectionServiceDep = Annotated[BookingProjectionService, Depends(get_booking_projection_service)]
+EventServiceDep = Annotated[EventService, Depends(get_event_service)]
 
 # DAO
 BookingDaoDep = Annotated[BookingDAO,Depends(get_booking_dao)]

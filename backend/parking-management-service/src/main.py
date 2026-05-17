@@ -8,6 +8,7 @@ from src.clients.auth_client import AuthServiceClient
 from src.dao.booking_dao import BookingDAO
 from src.dao.booking_projection_dao import BookingProjectionDAO
 from src.routers.booking_router import booking_router
+from src.routers.events_router import events_router
 from src.routers.mobile_compat_router import mobile_compat_router
 from src.routers.spot_router import spot_router
 from src.routers.parking_router import parking_router
@@ -45,6 +46,7 @@ app.include_router(health_router)
 app.include_router(analytics_router)
 app.include_router(booking_router)
 app.include_router(mobile_compat_router)
+app.include_router(events_router)
 
 
 
