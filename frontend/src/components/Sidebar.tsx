@@ -8,6 +8,7 @@ import {
   Camera,
   ParkingSquare,
   CalendarDays,
+  Cpu, 
 } from 'lucide-react';
 import type { Screen } from '../app/screens';
 
@@ -22,6 +23,7 @@ const mainMenuItems = [
   { id: 'vehicle-search' as Screen, label: 'Поиск транспорта', icon: Search },
   { id: 'analytics' as Screen, label: 'Аналитика', icon: BarChart3 },
   { id: 'bookings' as Screen, label: 'Журнал бронирований', icon: CalendarDays },
+  { id: 'device-panel' as Screen, label: 'Внешние устройства', icon: Cpu },
 ];
 
 const toolsMenuItems = [

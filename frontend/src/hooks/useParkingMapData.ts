@@ -7,7 +7,7 @@ import { useActiveParking } from "./useActiveParking";
 const NO_ACTIVE_PARKING_MESSAGE =
   "Нет активных парковок. Добавьте данные в БД.";
 
-const SPOTS_POLL_INTERVAL_MS = 30_000
+const SPOTS_POLL_INTERVAL_MS = 5_000
 
 // function normalizeSpots(spots: SpotReadShort[]) {
 //   return spots.map((spot) =>
@@ -19,12 +19,14 @@ export function useParkingMapData() {
   const parkingQuery = useActiveParking();
   const parkingId = parkingQuery.data?.id ?? null;
 
-  const spotsQuery = useQuery<SpotReadShort[]>({
+  const spotsQuery = useQuery<SpotRead[]>({
     queryKey: ["parkingMapSpots", parkingId],
     queryFn: async () => {
-      const response = await spotApi.getByParking(parkingId as number, { page: 1, size: 200 });
+      // const response = await spotApi.getMap(parkingId as number, { page: 1, size: 200 });
+      const response = await spotApi.getMap(parkingId as number);
       // return normalizeSpots(response.data.items);
-      return response.data.items
+      // return response.data.items
+      return response.data
     },
     enabled: parkingId != null,
     refetchInterval: SPOTS_POLL_INTERVAL_MS,

@@ -13,7 +13,7 @@ export function Header() {
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
             <div className="w-4 h-4 bg-white rounded-sm"></div>
           </div>
-          <h1 className="text-xl font-semibold text-gray-900">Умная Парковка</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Система управления парковками</h1>
         </div>
       </div>
 

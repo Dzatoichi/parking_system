@@ -19,6 +19,24 @@ spot_router = APIRouter(prefix="/spots", tags=["spots"])
 
 
 @spot_router.get(
+    "/{parking_id}/map",
+    response_model=list[SpotRead],
+    summary="Схема парковки с координатами",
+)
+async def get_spots_map(
+    parking_id: int,
+    service: SpotServiceDep,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=50, ge=1, le=200),
+) -> list[SpotRead]:
+    result = await service.get_spots_by_parking(
+        parking_id=parking_id,
+        page=page,
+        size=size
+    )
+    return result.items
+
+@spot_router.get(
     "/{parking_id}",
     response_model=PaginatedResponse[SpotReadShort],
     summary="Список мест парковки",
@@ -128,14 +146,3 @@ async def delete_spot(
     service: SpotServiceDep,
 ) -> None:
     await service.delete_spot(spot_id)
-
-# @spot_router.get(
-#     path="/{parking_id}/map",
-#     response_model=list[SpotRead],
-#     summary="Получение возвращает список мест с координатами",
-# )
-# async def get_spot_map(
-#         parking_id: int,
-#         service: SpotServiceDep,
-# ) -> list[SpotRead]:
-#     return await service.get_spot_map(parking_id)

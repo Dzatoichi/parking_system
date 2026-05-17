@@ -4,6 +4,10 @@ export const pmApi = axios.create({
   baseURL: "/api",
   headers: { "Content-Type": "application/json" },
 });
+export const emulatorApi = axios.create({
+  baseURL: "/emulator",
+  headers: { "Content-Type": "application/json" },
+});
 
 pmApi.interceptors.response.use(
   (r) => r,
@@ -163,7 +167,28 @@ export type AnalyticsOverview = {
   duration_distribution: { name: string; value: number; color: string }[];
   recent_events: { type: string; plate: string; time: string; action: string }[];
   mini_spots: { id: number; status: "free" | "occupied"; plate: string | null }[];
-};
+}
+
+export type DeviceStateOut = {
+  parking_id: number;
+  barrier: { position: "open" | "closed" };
+  lighting: { on: boolean; brightness: number};
+}
+
+export type CommandResultOut = {
+  success: boolean;
+  parking_id: number;
+  device_kind: string;
+  action: string;
+  state: { position: "open"};
+  message: string | null;
+}
+
+export type LightingSetBody = {
+  on: boolean;
+  brightness: number;
+  simulate_unreachable: boolean;
+}
 
 export const parkingApi = {
   getAll: (params?: { only_active?: boolean; page?: number; size?: number }) =>
@@ -185,6 +210,8 @@ export const spotApi = {
     pmApi.get<PaginatedResponse<SpotReadShort>>(`/spots/${parkingId}`, {
       params,
     }),
+  getMap: (parkingId: number) =>
+    pmApi.get<SpotRead[]>(`/spots/${parkingId}/map`),
   getStats: (parkingId: number) => pmApi.get<ParkingStats>(`/spots/${parkingId}/stats`),
   getDetail: (spotId: number) => pmApi.get<SpotRead>(`/spots/detail/${spotId}`),
   create: (parkingId: number, body: { spot_number: string; spot_type?: SpotType; spot_coordinates: SpotCoordinates }) =>
@@ -197,6 +224,8 @@ export const spotApi = {
 export const vehicleApi = {
   getAll: (params?: { only_inside?: boolean; page?: number; size?: number }) =>
     pmApi.get<PaginatedResponse<VehicleRead>>("/vehicles", { params }),
+  getById: (id: number) =>
+    pmApi.get<VehicleRead>(`/vehicles/${id}`),
   getByPlate: (plateNumber: string) =>
     pmApi.get<VehicleRead>(`/vehicles/by-plate/${encodeURIComponent(plateNumber)}`),
   getHistory: (vehicleId: number, params?: { limit?: number }) =>
@@ -221,3 +250,27 @@ export const bookingApi = {
   }) => pmApi.get<PaginatedResponse<BookingRead>>("/bookings", { params }),
 };
 
+export const DeviceApi = {
+  getDevicesState: (parkingId: number) =>
+    emulatorApi.get<DeviceStateOut>(`/v1/parking/${parkingId}/devices/state`),
+
+  openBarrier: (params: { parkingId: number; simulate_unreachable?: boolean }) =>
+    emulatorApi.post<CommandResultOut>(
+      `/v1/parking/${params.parkingId}/devices/barrier/open`,
+      null,
+      { params: { simulate_unreachable: params.simulate_unreachable ?? false } }
+    ),
+
+  closeBarrier: (params: { parkingId: number; simulate_unreachable?: boolean }) =>
+    emulatorApi.post<CommandResultOut>(
+      `/v1/parking/${params.parkingId}/devices/barrier/close`,
+      null,
+      { params: { simulate_unreachable: params.simulate_unreachable ?? false } }
+    ),
+
+  setLighting: (params: { parkignId: number; body: LightingSetBody }) =>
+    emulatorApi.post<CommandResultOut>(
+      `/v1/parking/${params.parkignId}/devices/lighting`,
+      params.body
+    ),
+};
