@@ -5,13 +5,21 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY pyproject.toml poetry.lock* ./
-RUN pip install --no-cache-dir poetry watchfiles && \
-    poetry config virtualenvs.create false && \
-    poetry install --only main --no-root
+RUN pip install --no-cache-dir --upgrade pip
+
+# Устанавливаем зависимости по одному (чтобы видеть где ошибка)
+RUN pip install --no-cache-dir fastapi uvicorn pydantic pydantic-settings httpx aio-pika
+
+RUN pip install --no-cache-dir numpy==1.26.4
+
+RUN pip install --no-cache-dir opencv-python-headless
+
+RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+
+RUN pip install --no-cache-dir ultralytics==8.2.0
 
 COPY . .
 
 EXPOSE 8001
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001"]

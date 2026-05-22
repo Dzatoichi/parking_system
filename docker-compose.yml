@@ -110,6 +110,13 @@ services:
       - ./backend/cv-processing-service/.env
     environment:
       WATCHFILES_FORCE_POLLING: "true"
+      PARKING_MANAGEMENT_URL: http://parking-management-service:8000
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      parking-management-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     ports:
       - "8001:8001"
     healthcheck:

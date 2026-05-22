@@ -18,7 +18,7 @@ async def get_events(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=50, ge=1, le=200),
 ) -> PaginatedResponse[SystemEventReadSchema]:
-    return await service.get_all_paginated_by_parking(
+    return await service.get_all_paginated(
         parking_id=parking_id,
         page=page,
         size=size,
@@ -34,4 +34,4 @@ async def get_event(
     event_id: int,
     service: EventServiceDep,
 ) -> SystemEventReadSchema:
-    return await service.get_event(event_id=event_id)
+    return await service.get_by_id(event_id=event_id)

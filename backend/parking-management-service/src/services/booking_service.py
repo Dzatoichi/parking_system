@@ -62,6 +62,7 @@ class BookingService:
         created_booking = await self._booking_dao.create(
             {
                 "user_id": booking_create.user_id,
+                "vehicle_id": booking_create.vehicle_id,
                 "spot_id": booking_create.spot_id,
                 "start_time": booking_create.start_time,
                 "end_time": booking_create.end_time,
@@ -226,6 +227,7 @@ class BookingService:
                 "booking_id": booking.id,
                 "parking_id": parking_id,
                 "user_id": booking.user_id,
+                "vehicle_id": booking.vehicle_id,
                 "spot_id": booking.spot_id,
                 "spot_number": spot_number,
                 "status": booking.status.value,
@@ -242,6 +244,7 @@ class BookingService:
             id=projection.booking_id,
             user_id=projection.user_id,
             user_name=projection.user_name,
+            vehicle_id=getattr(projection, "vehicle_id", None),
             spot_id=projection.spot_id,
             spot_number=projection.spot_number,
             start_time=projection.start_time,

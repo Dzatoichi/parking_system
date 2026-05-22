@@ -23,7 +23,7 @@ class EventDAO(BaseDAO[SystemEvent]):
         offset = (page - 1) * size
 
         stmt = select(self.model).where(self.model.parking_id==parking_id).offset(offset).limit(size)
-        count_stmt = select(func.count()).select_from(self.model)
+        count_stmt = select(func.count()).select_from(self.model).where(self.model.parking_id == parking_id)
         async with self._get_session() as session:
             total_result = await session.execute(count_stmt)
             total = total_result.scalar()

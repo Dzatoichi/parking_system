@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { getApiErrorMessage } from "../lib/api";
-import { spotApi, type SpotReadShort } from "../services/pmApi";
+import { spotApi, type SpotRead } from "../services/pmApi";
 import { useActiveParking } from "./useActiveParking";
 
 const NO_ACTIVE_PARKING_MESSAGE =
   "Нет активных парковок. Добавьте данные в БД.";
 
-const SPOTS_POLL_INTERVAL_MS = 5_000
+const SPOTS_POLL_INTERVAL_MS = 1_000
 
 // function normalizeSpots(spots: SpotReadShort[]) {
 //   return spots.map((spot) =>

@@ -12,34 +12,32 @@ from src.schemas.spot_schemas import SpotCoordinates
 
 
 class BookingCreate(BaseSchema):
-    user_id: int = Field(..., gt=0, description="ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ")
-    spot_id: int = Field(..., gt=0, description="ID РїР°СЂРєРѕРІРѕС‡РЅРѕРіРѕ РјРµСЃС‚Р°")
-    start_time: datetime = Field(..., description="РќР°С‡Р°Р»Рѕ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ")
-    end_time: datetime = Field(..., description="РљРѕРЅРµС† Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ")
+    user_id: int = Field(..., gt=0)
+    vehicle_id: int | None = Field(default=None, gt=0)
+    spot_id: int = Field(..., gt=0)
+    start_time: datetime
+    end_time: datetime
 
     @field_validator("end_time")
     @classmethod
     def end_time_after_start(cls, value: datetime, info: ValidationInfo) -> datetime:
         start_time = info.data.get("start_time")
         if start_time and value <= start_time:
-            raise ValueError("end_time РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїРѕР·Р¶Рµ start_time")
+            raise ValueError("end_time must be after start_time")
         return value
 
 
 class BookingUpdate(BaseSchema):
-    status: BookingStatus | None = Field(default=None, description="РќРѕРІС‹Р№ СЃС‚Р°С‚СѓСЃ")
+    status: BookingStatus | None = None
     notes: str | None = Field(default=None, max_length=500)
-    cancellation_reason: str | None = Field(
-        default=None,
-        max_length=500,
-        description="РџСЂРёС‡РёРЅР° РѕС‚РјРµРЅС‹",
-    )
+    cancellation_reason: str | None = Field(default=None, max_length=500)
 
 
 class BookingRead(BaseSchema):
     id: int
     user_id: int
     user_name: str | None = None
+    vehicle_id: int | None = None
     spot_id: int
     spot_number: str | None = None
     start_time: datetime

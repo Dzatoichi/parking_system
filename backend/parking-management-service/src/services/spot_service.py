@@ -18,6 +18,8 @@ from src.schemas import (
     ParkingStats,
 )
 from src.dao.parking_dao import ParkingDAO
+from src.dao.event_dao import EventDAO
+from src.models.system_events import SystemEvent
 
 
 class SpotService:
@@ -31,9 +33,10 @@ class SpotService:
       - Методы возвращают Pydantic-схемы, а не ORM-объекты
     """
 
-    def __init__(self, spot_dao: SpotDAO, parking_dao: ParkingDAO) -> None:
+    def __init__(self, spot_dao: SpotDAO, parking_dao: ParkingDAO, event_dao: EventDAO | None = None) -> None:
         self._dao = spot_dao
         self._parking_dao = parking_dao
+        self._event_dao = event_dao
 
     async def get_spot_by_id(self, spot_id: int) -> SpotRead:
         spot = await self._dao.get_by_id(spot_id)
@@ -181,6 +184,23 @@ class SpotService:
         )
         stats = await self._dao.get_stats(spot.parking_id)
         await self._parking_dao.update(spot.parking_id, available_spots=stats["free"])
+        if self._event_dao is not None:
+            await self._event_dao.create(
+                {
+                    "event_type": "spot_status_changed",
+                    "entity_type": "spot",
+                    "entity_id": spot_id,
+                    "parking_id": spot.parking_id,
+                    "message": "spot status",
+                    "payload": {
+                        "source": data.source or "api",
+                        "previous_status": spot.spot_status.value,
+                        "new_status": data.status.value,
+                        "vehicle_id": data.vehicle_id,
+                        **(data.payload or {}),
+                    },
+                }
+            )
         return SpotRead.model_validate(updated)
 
     async def update_coordinates(

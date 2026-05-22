@@ -54,6 +54,8 @@ class SpotStatusUpdate(BaseSchema):
     """
     status: SpotStatus
     vehicle_id: Optional[int] = None
+    source: str | None = None
+    payload: dict | None = None
 
     @model_validator(mode="after")
     def vehicle_required_when_occupied(self) -> "SpotStatusUpdate":

@@ -80,10 +80,12 @@ def get_event_dao():
 def get_spot_service(
     spot_dao: SpotDAO = Depends(get_spots_dao),
     parking_dao: ParkingDAO = Depends(get_parking_dao),
+    event_dao: EventDAO = Depends(get_event_dao),
 ) -> SpotService:
     return SpotService(
         spot_dao=spot_dao,
-        parking_dao=parking_dao
+        parking_dao=parking_dao,
+        event_dao=event_dao,
     )
 
 def get_parking_service(

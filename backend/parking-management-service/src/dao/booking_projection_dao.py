@@ -21,6 +21,7 @@ class BookingProjectionDAO(BaseDAO[BookingProjection]):
                 "parking_id": payload["parking_id"],
                 "user_id": payload["user_id"],
                 "user_name": payload.get("user_name"),
+                "vehicle_id": payload.get("vehicle_id"),
                 "spot_id": payload["spot_id"],
                 "spot_number": payload["spot_number"],
                 "status": payload["status"],
