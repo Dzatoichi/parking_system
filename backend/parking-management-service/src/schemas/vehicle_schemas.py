@@ -51,6 +51,11 @@ class VehicleCreate(BaseSchema):
     def normalize_plate(cls, v: str) -> str:
         return v.strip().upper()
 
+class MobileVehicleCreate(VehicleCreate):
+    name: str | None = None
+    brand_id: int | None = None
+    body_type_id: int | None = None
+
 
 class VehicleRead(BaseSchema):
     """

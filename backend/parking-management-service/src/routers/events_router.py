@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query
 
 from src.models.system_events import SystemEvent
 from src.schemas import PaginatedResponse
-from src.schemas.events_schemas import SystemEventReadSchema
+from src.schemas.events_schemas import SystemEventReadSchema, SystemEventCreateSchema
 from src.utils.dependencies import EventServiceDep
 
 events_router = APIRouter(prefix="/events", tags=["events"])
@@ -35,3 +35,14 @@ async def get_event(
     service: EventServiceDep,
 ) -> SystemEventReadSchema:
     return await service.get_by_id(event_id=event_id)
+
+@events_router.post(
+    path="",
+    response_model=SystemEventReadSchema,
+    summary="Создание события",
+)
+async def create_event(
+    data: SystemEventCreateSchema,
+    service: EventServiceDep,
+) -> SystemEventReadSchema:
+    return await service.add_event(data)

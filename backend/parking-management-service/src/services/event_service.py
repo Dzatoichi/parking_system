@@ -1,7 +1,7 @@
 from src.dao.event_dao import EventDAO
 from src.models.system_events import SystemEvent
 from src.schemas import PaginatedResponse
-from src.schemas.events_schemas import SystemEventReadSchema
+from src.schemas.events_schemas import SystemEventReadSchema, SystemEventCreateSchema
 
 
 class EventService:
@@ -33,3 +33,11 @@ class EventService:
             page=page,
             size=size
         )
+
+    async def add_event(
+            self,
+            data: SystemEventCreateSchema,
+    ) -> SystemEventReadSchema:
+        data_dict = data.model_dump()
+        event = await self._dao.create(data_dict)
+        return SystemEventReadSchema.model_validate(event)

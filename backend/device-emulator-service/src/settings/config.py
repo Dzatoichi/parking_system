@@ -6,5 +6,7 @@ class Settings(BaseSettings):
 
     sqlite_path: str = "sqlite+aiosqlite:///./data/emulator.db"
 
+    PARKING_MANAGMENT_SERVICE_URL: str
+    PARKING_MANAGEMENT_TIMEOUT_SECONDS: int
 
 settings = Settings()

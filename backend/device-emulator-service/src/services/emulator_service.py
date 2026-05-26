@@ -19,6 +19,10 @@ from src.schemas import (
     LightingStateOut,
     ParkingDevicesStateOut,
 )
+from src.services.event_producer import EventProducer
+
+from src.schemas.type.event_type import EventType
+from src.schemas.device_events_schemas import SystemEventCreateSchema
 
 KIND_BARRIER = "barrier"
 KIND_LIGHTING = "lighting"
@@ -33,8 +37,9 @@ def _default_lighting_state() -> dict[str, Any]:
 
 
 class EmulatorService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, event_producer: EventProducer) -> None:
         self._session = session
+        self._event_producer = event_producer
 
     async def _get_device_row(self, parking_id: int, device_kind: str) -> EmulatedDevice | None:
         stmt = select(EmulatedDevice).where(
@@ -120,7 +125,13 @@ class EmulatorService:
                 message="Устройство недоступно (симуляция)",
             )
         new_state = {"position": "open"}
+        # system_event = SystemEventCreateSchema(
+        #     event_type=EventType.BARRIER_OPENED,
+        #     entity_type=KIND_BARRIER,
+        #     entity_id=_id,
+        # )
         await self._upsert_state(parking_id, KIND_BARRIER, new_state)
+        # await self._event_producer
         await self._append_event(
             parking_id=parking_id,
             device_kind=KIND_BARRIER,

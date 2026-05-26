@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from pydantic import BaseModel, Field
 
 from src.models.status.booking_status import BookingStatus
@@ -9,6 +9,10 @@ from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
 from src.schemas.booking_schemas import BookingCreate, BookingRead, BookingUpdate
 from src.schemas.spot_schemas import SpotStatusUpdate
+from src.schemas.vehicle_schemas import VehicleCreate, VehicleRead
+from src.schemas.parking_schemas import ParkingRead
+from src.schemas.vehicle_schemas import MobileVehicleCreate
+from src.schemas.common import PaginatedResponse
 from src.utils.dependencies import (
     BookingServiceDep,
     ParkingServiceDep,
@@ -327,3 +331,33 @@ async def finish_mobile_rental(
         BookingUpdate(status=BookingStatus.COMPLETED),
     )
     return True
+
+@mobile_compat_router.post(path="/cars/add", response_model=VehicleRead, status_code=status.HTTP_201_CREATED)
+async def register_vehicle(
+    body: MobileVehicleCreate,
+    service: VehicleServiceDep,
+    owner_id: int = Depends(get_current_user_id),
+) -> VehicleRead:
+    return await service.register_vehicle(body, owner_id)
+
+@mobile_compat_router.get(path="/parking/list", response_model=PaginatedResponse[ParkingRead])
+async def get_parkings(
+    service: ParkingServiceDep,
+    only_active: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=50, ge=1, le=200),
+) -> PaginatedResponse[ParkingRead]:
+    return await service.get_all_parkings(only_active=only_active, page=page, size=size)
+
+@mobile_compat_router.get(path="booking/active")
+async def get_active_booking(
+    booking_service: BookingServiceDep,
+    spot_service: SpotServiceDep,
+    user_id: int = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    # то же что /booking/me — алиас для совместимости
+    bookings = await booking_service.get_user_bookings(user_id=user_id, page=1, size=20)
+    for booking in bookings.items:
+        if booking.status in {BookingStatus.PENDING, BookingStatus.CONFIRMED}:
+            return await _booking_to_mobile(booking, spot_service)
+    raise HTTPException(status_code=404, detail="Активное бронирование не найдено")
