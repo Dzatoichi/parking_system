@@ -1,7 +1,35 @@
 from datetime import datetime
+import enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class BaseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EventType(enum.Enum):
+    SPOT_STATUS_CHANGED = "spot_status_changed"
+    BOOKING_CREATES = "booking_created"
+    BOOKING_CANCELED = "booking_canceled"
+    BOOKING_COMPLETED = "booking_completed"
+    BOOKING_CONFLICT = "booking_conflict"
+    BARRIER_OPENED = "barrier_opened"
+    BARRIER_CLOSED = "barrier_closed"
+    LIGHTING_CHANGED = "lighting_changed"
+    DEVICE_UNAVAILABLE = "device_unavailable"
+    VEHICLE_DETECTED = "vehicle_detected"
+    VEHICLE_DEPARTED = "vehicle_departed"
+
+
+class SystemEventCreateSchema(BaseSchema):
+    event_type: str
+    entity_type: str
+    entity_id: int
+    parking_id: int
+    message: str
+    payload: dict
 
 
 class LightingSetBody(BaseModel):

@@ -18,11 +18,10 @@ from src.schemas import (
     LightingSetBody,
     LightingStateOut,
     ParkingDevicesStateOut,
+    EventType,
+    SystemEventCreateSchema,
 )
 from src.services.event_producer import EventProducer
-
-from src.schemas.type.event_type import EventType
-from src.schemas.device_events_schemas import SystemEventCreateSchema
 
 KIND_BARRIER = "barrier"
 KIND_LIGHTING = "lighting"
@@ -37,7 +36,7 @@ def _default_lighting_state() -> dict[str, Any]:
 
 
 class EmulatorService:
-    def __init__(self, session: AsyncSession, event_producer: EventProducer) -> None:
+    def __init__(self, session: AsyncSession, event_producer: EventProducer | None = None) -> None:
         self._session = session
         self._event_producer = event_producer
 

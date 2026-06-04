@@ -2,7 +2,7 @@ from typing import Any
 
 import httpx
 
-from src.schemas.events_schemas import SystemEventCreateSchema
+from src.schemas import SystemEventCreateSchema
 
 class EventsClient:
     def __init__(self, base_url: str, timeout: int) -> None:
@@ -13,7 +13,7 @@ class EventsClient:
         self,
         event_data: SystemEventCreateSchema
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(f"{self._base_url}/events", json=event_data.model_dump())
             response.raise_for_status()
             return response.json()

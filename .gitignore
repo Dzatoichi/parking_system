@@ -62,7 +62,6 @@ vite.svg
 
 # Project-specific local assets
 _other/
-Models/
 videos/
 parking_marker/
 cameras_network/

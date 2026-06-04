@@ -15,7 +15,7 @@ def get_emulator_service(session: SessionDep) -> EmulatorService:
     return EmulatorService(session)
 
 def get_events_client(
-    base_url: str = settings.PARKING_MANAGMENT_SERVICE_URL.rstrip("/"),
+    base_url: str = settings.PARKING_MANAGEMENT_SERVICE_URL.rstrip("/"),
     timeout: int = settings.PARKING_MANAGEMENT_TIMEOUT_SECONDS,
 ) -> EventsClient:
     return EventsClient(base_url=base_url,timeout=timeout)

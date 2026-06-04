@@ -160,6 +160,8 @@ services:
     environment:
       WATCHFILES_FORCE_POLLING: "true"
       SQLITE_PATH: sqlite+aiosqlite:////app/data/emulator.db
+      PARKING_MANAGEMENT_SERVICE_URL: http://parking-management-service:8000
+      PARKING_MANAGEMENT_TIMEOUT_SECONDS: 5
     ports:
       - "8004:8004"
     healthcheck:

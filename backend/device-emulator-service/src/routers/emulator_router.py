@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 
 from src.schemas import CommandResultOut, IntegrationEventListOut, LightingSetBody, ParkingDevicesStateOut
-from src.utils.deps import EmulatorServiceDep
+from src.utils.dependencies import EmulatorServiceDep
 
 emulator_router = APIRouter(prefix="/v1/parking/{parking_id}/devices", tags=["device-emulator"])
 

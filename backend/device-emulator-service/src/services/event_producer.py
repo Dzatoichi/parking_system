@@ -1,9 +1,9 @@
-from src.schemas.events_schemas import SystemEventCreateSchema
-from src.utils.dependencies import EventsClientDep
+from src.schemas import SystemEventCreateSchema
+from src.clients.events_client import EventsClient
 
 
 class EventProducer:
-    def __init__(self, events_client: EventsClientDep):
+    def __init__(self, events_client: EventsClient):
         self.events_client = events_client
 
     async def send_device_event(self, data: SystemEventCreateSchema):
