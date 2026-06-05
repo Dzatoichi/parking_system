@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Smart Parking",
+    "slug": "smart-parking-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      }
+    },
+    "extra": {
+      "apiUrl": "auto",
+      "apiPort": "8080"
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}

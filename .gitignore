@@ -33,13 +33,18 @@ pip-wheel-metadata/
 # Test / local tooling
 .tox/
 .nox/
-.hypothesis/
+.hypothesis/'
+
+
+
+'
 
 # Environment and secrets
 .env
 .env.*
 !.env.example
 !.env.template
+backend/notification-service/secrets/*.json
 
 # Frontend
 node_modules/
