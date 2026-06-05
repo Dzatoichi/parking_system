@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from src.brokers.rabbitmq import BookingEventBroker
 from src.dao.booking_dao import BookingDAO
 from src.dao.booking_projection_dao import BookingProjectionDAO
+from src.dao.event_dao import EventDAO
 from src.dao.parking_dao import ParkingDAO
 from src.dao.spot_dao import SpotDAO
 from src.models.booking import Booking
@@ -27,12 +28,14 @@ class BookingService:
         parking_dao: ParkingDAO,
         projection_dao: BookingProjectionDAO,
         event_broker: BookingEventBroker,
+        event_dao: EventDAO | None = None,
     ) -> None:
         self._booking_dao = booking_dao
         self._spot_dao = spot_dao
         self._parking_dao = parking_dao
         self._projection_dao = projection_dao
         self._event_broker = event_broker
+        self._event_dao = event_dao
 
     async def create_booking(self, booking_create: BookingCreate) -> BookingRead:
         spot = await self._spot_dao.get_by_id(booking_create.spot_id)
@@ -71,6 +74,13 @@ class BookingService:
         )
         await self._spot_dao.update_status(spot.id, SpotStatus.RESERVED, vehicle_id=spot.current_vehicle_id)
         await self._sync_parking_available_spots(spot.parking_id)
+        await self._create_booking_event(
+            created_booking,
+            parking_id=spot.parking_id,
+            spot_number=spot.spot_number,
+            event_type="booking_created",
+            message="booking created",
+        )
         await self._publish_projection_event(created_booking, spot.parking_id, spot.spot_number)
         return await self.get_booking(created_booking.id)
 
@@ -91,7 +101,7 @@ class BookingService:
         start_from: datetime | None = None,
         end_to: datetime | None = None,
     ) -> BookingListResponse:
-        bookings, total = await self._projection_dao.get_paginated(
+        bookings, total = await self._booking_dao.get_paginated(
             page=page,
             size=size,
             parking_id=parking_id,
@@ -99,8 +109,12 @@ class BookingService:
             start_from=start_from,
             end_to=end_to,
         )
+        projections = await self._projection_dao.get_by_booking_ids([booking.id for booking in bookings])
         return BookingListResponse.create(
-            items=[self._projection_to_read(item) for item in bookings],
+            items=[
+                self._booking_to_read(booking, projections.get(booking.id))
+                for booking in bookings
+            ],
             total=total,
             page=page,
             size=size,
@@ -112,9 +126,19 @@ class BookingService:
         page: int = 1,
         size: int = 20,
     ) -> BookingListResponse:
-        bookings, total = await self._projection_dao.get_paginated(page=page, size=size, user_id=user_id)
+        offset_page = max(page, 1)
+        offset = (offset_page - 1) * size
+        bookings, total = await self._booking_dao.get_user_bookings(
+            user_id=user_id,
+            offset=offset,
+            limit=size,
+        )
+        projections = await self._projection_dao.get_by_booking_ids([booking.id for booking in bookings])
         return BookingListResponse.create(
-            items=[self._projection_to_read(item) for item in bookings],
+            items=[
+                self._booking_to_read(booking, projections.get(booking.id))
+                for booking in bookings
+            ],
             total=total,
             page=page,
             size=size,
@@ -194,6 +218,13 @@ class BookingService:
 
         spot = await self._spot_dao.get_by_id(updated.spot_id)
         assert spot is not None
+        if previous_status != updated.status:
+            await self._create_booking_status_event(
+                updated,
+                parking_id=spot.parking_id,
+                spot_number=spot.spot_number,
+                previous_status=previous_status,
+            )
         await self._publish_projection_event(updated, spot.parking_id, spot.spot_number)
         return await self.get_booking(updated.id)
 
@@ -221,21 +252,83 @@ class BookingService:
         await self._parking_dao.update(parking_id, available_spots= stats["free"])
 
     async def _publish_projection_event(self, booking: Booking, parking_id: int, spot_number: str) -> None:
-        await self._event_broker.publish(
-            routing_key="booking.changed",
-            payload={
-                "booking_id": booking.id,
+        try:
+            await self._event_broker.publish(
+                routing_key="booking.changed",
+                payload={
+                    "booking_id": booking.id,
+                    "parking_id": parking_id,
+                    "user_id": booking.user_id,
+                    "vehicle_id": booking.vehicle_id,
+                    "spot_id": booking.spot_id,
+                    "spot_number": spot_number,
+                    "status": booking.status.value,
+                    "start_time": booking.start_time.isoformat(),
+                    "end_time": booking.end_time.isoformat(),
+                    "created_at": booking.created_at.isoformat(),
+                    "updated_at": booking.updated_at.isoformat(),
+                },
+            )
+        except Exception:
+            # The booking table is the source of truth; RabbitMQ only refreshes the read projection.
+            return
+
+    async def _create_booking_status_event(
+        self,
+        booking: Booking,
+        *,
+        parking_id: int,
+        spot_number: str,
+        previous_status: BookingStatus,
+    ) -> None:
+        message_by_status = {
+            BookingStatus.CONFIRMED: "booking confirmed",
+            BookingStatus.CANCELLED: "booking canceled",
+            BookingStatus.COMPLETED: "booking completed",
+            BookingStatus.EXPIRED: "booking expired",
+        }
+        await self._create_booking_event(
+            booking,
+            parking_id=parking_id,
+            spot_number=spot_number,
+            event_type="booking_status",
+            message=message_by_status.get(booking.status, "booking status"),
+            extra_payload={"previous_status": previous_status.value},
+        )
+
+    async def _create_booking_event(
+        self,
+        booking: Booking,
+        *,
+        parking_id: int,
+        spot_number: str,
+        event_type: str,
+        message: str,
+        extra_payload: dict | None = None,
+    ) -> None:
+        if self._event_dao is None:
+            return
+
+        payload = {
+            "booking_id": booking.id,
+            "user_id": booking.user_id,
+            "vehicle_id": booking.vehicle_id,
+            "spot_id": booking.spot_id,
+            "spot_number": spot_number,
+            "status": booking.status.value,
+            "start_time": booking.start_time.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            **(extra_payload or {}),
+        }
+        await self._event_dao.create(
+            {
+                "event_type": event_type,
+                "entity_type": "booking",
+                "entity_id": booking.id,
                 "parking_id": parking_id,
-                "user_id": booking.user_id,
-                "vehicle_id": booking.vehicle_id,
-                "spot_id": booking.spot_id,
-                "spot_number": spot_number,
-                "status": booking.status.value,
-                "start_time": booking.start_time.isoformat(),
-                "end_time": booking.end_time.isoformat(),
-                "created_at": booking.created_at.isoformat(),
-                "updated_at": booking.updated_at.isoformat(),
-            },
+                "message": message,
+                "payload": payload,
+            }
         )
 
     @staticmethod
@@ -252,4 +345,22 @@ class BookingService:
             status=projection.status,
             created_at=projection.created_at,
             updated_at=projection.updated_at,
+        )
+
+    @staticmethod
+    def _booking_to_read(booking: Booking, projection=None) -> BookingRead:
+        return BookingRead(
+            id=booking.id,
+            user_id=booking.user_id,
+            user_name=getattr(projection, "user_name", None),
+            vehicle_id=getattr(booking, "vehicle_id", None),
+            spot_id=booking.spot_id,
+            spot_number=getattr(getattr(booking, "spot", None), "spot_number", None),
+            start_time=booking.start_time,
+            end_time=booking.end_time,
+            status=booking.status,
+            created_at=booking.created_at,
+            updated_at=booking.updated_at,
+            notes=booking.notes,
+            cancellation_reason=booking.cancellation_reason,
         )

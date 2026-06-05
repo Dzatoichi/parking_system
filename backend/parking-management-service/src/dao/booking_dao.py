@@ -29,7 +29,7 @@ class BookingDAO(BaseDAO[Booking]):
         limit: int = 50,
     ) -> tuple[list[Booking], int]:
         async with self._get_session() as session:
-            query = select(self.model).where(self.model.user_id == user_id)
+            query = select(self.model).options(selectinload(self.model.spot)).where(self.model.user_id == user_id)
             count_query = select(func.count(self.model.id)).where(self.model.user_id == user_id)
             if status_filter:
                 query = query.where(self.model.status == status_filter)

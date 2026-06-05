@@ -1,6 +1,7 @@
 """
 3D Scene Manager - получает 2D детекции, проецирует в 3D и определяет занятость.
 """
+import threading
 
 import numpy as np
 import cv2
@@ -18,78 +19,6 @@ class CarDetection:
     direction: Optional[np.ndarray] = None  # (dx, dy) - единичный вектор направления
 
 
-# @dataclass
-# class ParkingContainer3D:
-#     """Парковочное место в 3D - основные геометрические данные"""
-#     id: int
-#     name: str
-#     ground_corners: np.ndarray  # (4,3) на полу (Y=0)
-#     upper_corners: np.ndarray  # (4,3) на высоте
-#     image_points: np.ndarray  # (4,2) на изображении (опционально, для отладки)
-#     length: float  # Длина контейнера (по X)
-#     width: float  # Ширина контейнера (по Z)
-#     height: float  # Высота контейнера
-#
-#     @property
-#     def polygon_xz(self) -> np.ndarray:
-#         """Многоугольник на плоскости XZ для проверки принадлежности"""
-#         return self.ground_corners[:, [0, 2]]
-#
-#     @property
-#     def center(self) -> np.ndarray:
-#         """Центр контейнера"""
-#         return np.mean(self.ground_corners, axis=0)
-#
-#     def contains_point(self, point_xz: np.ndarray) -> bool:
-#         """Проверяет, лежит ли точка (X, Z) внутри контейнера"""
-#         x, z = point_xz
-#         inside = False
-#         n = len(self.polygon_xz)
-#         for i in range(n):
-#             x1, z1 = self.polygon_xz[i]
-#             x2, z2 = self.polygon_xz[(i + 1) % n]
-#             if ((z1 > z) != (z2 > z)) and (x < (x2 - x1) * (z - z1) / (z2 - z1) + x1):
-#                 inside = not inside
-#         return inside
-
-
-# @dataclass
-# class CameraCalibration:
-#     """Калибровка камеры для проекций"""
-#     camera_matrix: np.ndarray  # (3,3) матрица камеры
-#     dist_coeffs: np.ndarray  # коэффициенты дисторсии
-#     image_shape: Tuple[int, int]  # (height, width)
-#
-#     # Вычисляемые свойства
-#     @property
-#     def fx(self) -> float:
-#         return self.camera_matrix[0, 0]
-#
-#     @property
-#     def fy(self) -> float:
-#         return self.camera_matrix[1, 1]
-#
-#     @property
-#     def cx(self) -> float:
-#         return self.camera_matrix[0, 2]
-#
-#     @property
-#     def cy(self) -> float:
-#         return self.camera_matrix[1, 2]
-#
-#     @classmethod
-#     def create_default(cls, image_shape: Tuple[int, int], focal_scale: float = 1.0):
-#         """Создает калибровку по умолчанию на основе размера изображения"""
-#         h, w = image_shape[:2]
-#         focal = max(w, h) * focal_scale
-#         camera_matrix = np.array([
-#             [focal, 0, w // 2],
-#             [0, focal, h // 2],
-#             [0, 0, 1]
-#         ], dtype=np.float32)
-#         dist_coeffs = np.zeros((4, 1))
-#         return cls(camera_matrix=camera_matrix, dist_coeffs=dist_coeffs, image_shape=image_shape)
-
 @dataclass
 class Car3D:
     """Автомобиль в 3D сцене"""
@@ -101,12 +30,12 @@ class Car3D:
     timestamp: float = 0.0
 
 
-@dataclass
-class SceneFrame:
-    """Один кадр анимации"""
-    frame_number: int
-    timestamp: float
-    cars: List[Car3D] = field(default_factory=list)
+# @dataclass
+# class SceneFrame:
+#     """Один кадр анимации"""
+#     frame_number: int
+#     timestamp: float
+#     cars: List[Car3D] = field(default_factory=list)
 
 
 class Scene3D:
@@ -135,24 +64,27 @@ class Scene3D:
         # Высота центра автомобиля
         self.center_height: float = 0.5
 
-        # История
-        self.frames: List[SceneFrame] = []
-        self.current_frame_index: int = 0
+        # # История
+        # self.frames: List[SceneFrame] = []
+        # self.current_frame_index: int = 0
         self._current_cars: Dict[int, Car3D] = {}
         self._current_occupancy: Dict[int, Set[int]] = {}
 
         # Отладка
         self.debug_points: List[np.ndarray] = []
 
+        self._lock = threading.RLock()
+
     # ====== Управление калибровкой ======
 
     def set_camera_calibration(self, calibration: CameraCalibration):
         """Устанавливает калибровку камеры"""
         self.camera_calibration = calibration
-        if calibration.homography is not None:
-            self._base_homography = calibration.homography
-        else:
-            self._base_homography = None
+        self._base_homography = calibration.homography if calibration.homography is not None else None
+        self._base_R, _ = cv2.Rodrigues(calibration.rvec)
+        self._base_R_inv = np.linalg.inv(self._base_R)
+        self._base_tvec = calibration.tvec
+        self._base_camera_position = -self._base_R_inv @ self._base_tvec.flatten()
 
     def set_camera_from_image(self, image_shape: Tuple[int, int], focal_scale: float = 1.0):
         """Создает калибровку по умолчанию из размера изображения"""
@@ -184,6 +116,7 @@ class Scene3D:
         if H is None:
             raise ValueError("Не удалось вычислить гомографию")
         self._base_homography = H
+
         if self.camera_calibration is not None:
             self.camera_calibration.homography = self._base_homography
 
@@ -201,6 +134,7 @@ class Scene3D:
             self._base_R_inv = np.linalg.inv(self._base_R)
             self._base_tvec = tvec
             self._base_camera_position = -self._base_R_inv @ tvec.flatten()
+
 
         # Верхние углы
         upper_corners = world_points_ground + [0, height, 0]
@@ -305,8 +239,8 @@ class Scene3D:
             upper_corners = world_points + [0, container.height, 0]
 
             # Обновляем контейнер
-            container.ground_corners = world_points
-            container.upper_corners = upper_corners
+            container.ground_points = world_points
+            container.upper_points = upper_corners
             container.image_points = image_points
 
         return True
@@ -360,62 +294,60 @@ class Scene3D:
 
     def add_detections(self, detections: List[CarDetection],
                        frame_number: int, timestamp: float):
-        """Добавляет кадр с детекциями"""
-        if self.base_container_id is None:
-            raise ValueError("Нет базового контейнера для проекции")
+        with self._lock:
+            """Добавляет кадр с детекциями"""
+            if self.base_container_id is None:
+                raise ValueError("Нет базового контейнера для проекции")
 
-        cars_3d = []
-        current_tracks = set()
+            cars_3d = []
+            current_tracks = set()
 
-        for detection in detections:
-            track_id = detection.track_id
-            center_2d = detection.center
-            dir_2d = detection.direction
+            for detection in detections:
+                track_id = detection.track_id
+                center_2d = detection.center
+                dir_2d = detection.direction
 
-            # Проецируем центр в 3D
-            center_3d = self.project_to_height(center_2d, self.center_height)
-            if center_3d is None:
-                continue
+                # Проецируем центр в 3D
+                center_3d = self.project_to_height(center_2d, self.center_height)
+                if center_3d is None:
+                    continue
 
-            # Проецируем направление
-            direction_3d = None
-            if dir_2d is not None:
-                dir_point_2d = center_2d + dir_2d * 20
-                dir_point_3d = self.project_to_height(dir_point_2d, self.center_height)
-                if dir_point_3d is not None:
-                    direction_3d = dir_point_3d - center_3d
-                    norm = np.linalg.norm(direction_3d)
-                    if norm > 0.1:
-                        direction_3d = direction_3d / norm
+                # Проецируем направление
+                direction_3d = None
+                if dir_2d is not None:
+                    dir_point_2d = center_2d + dir_2d * 20
+                    dir_point_3d = self.project_to_height(dir_point_2d, self.center_height)
+                    if dir_point_3d is not None:
+                        direction_3d = dir_point_3d - center_3d
+                        norm = np.linalg.norm(direction_3d)
+                        if norm > 0.1:
+                            direction_3d = direction_3d / norm
 
-            # Определяем контейнер
-            container_id = self._find_container(center_3d[[0, 2]])
+                # Определяем контейнер
+                container_id = self._find_container(center_3d[[0, 2]])
 
-            car = Car3D(
-                track_id=track_id,
-                center=center_3d,
-                direction=direction_3d,
-                container_id=container_id,
-                frame=frame_number,
-                timestamp=timestamp
-            )
-            cars_3d.append(car)
-            current_tracks.add(track_id)
-            self._current_cars[track_id] = car
+                car = Car3D(
+                    track_id=track_id,
+                    center=center_3d,
+                    direction=direction_3d,
+                    container_id=container_id,
+                    frame=frame_number,
+                    timestamp=timestamp
+                )
+                cars_3d.append(car)
+                current_tracks.add(track_id)
+                self._current_cars[track_id] = car
 
-        # Очистка исчезнувших машин
-        for tid in list(self._current_cars.keys()):
-            if tid not in current_tracks:
-                del self._current_cars[tid]
+            # Очистка исчезнувших машин
+            for tid in list(self._current_cars.keys()):
+                if tid not in current_tracks:
+                    del self._current_cars[tid]
 
-        # Обновляем occupancy
-        self._update_occupancy()
+            # Обновляем occupancy
+            self._update_occupancy()
 
-        # Сохраняем кадр
-        frame = SceneFrame(frame_number=frame_number, timestamp=timestamp, cars=cars_3d)
-        self.frames.append(frame)
 
-        return cars_3d
+            return cars_3d
 
     def _find_container(self, point_xz: np.ndarray) -> int:
         """Находит ID контейнера, содержащего точку"""
@@ -461,30 +393,35 @@ class Scene3D:
         occupied = set(self._current_occupancy.keys())
         return list(all_spots - occupied)
 
-    # ====== История (без изменений) ======
+    # Новый метод для получения текущих автомобилей
+    def get_current_cars(self) -> List[Car3D]:
+        with self._lock:
+            return list(self._current_cars.values())
 
-    def get_frame(self, index: int) -> Optional[SceneFrame]:
-        if 0 <= index < len(self.frames):
-            return self.frames[index]
-        return None
-
-    def get_current_frame(self) -> Optional[SceneFrame]:
-        return self.get_frame(self.current_frame_index)
-
-    def next_frame(self):
-        if self.current_frame_index < len(self.frames) - 1:
-            self.current_frame_index += 1
-            self._current_cars = {car.track_id: car for car in self.frames[self.current_frame_index].cars}
-            self._update_occupancy()
-
-    def prev_frame(self):
-        if self.current_frame_index > 0:
-            self.current_frame_index -= 1
-            self._current_cars = {car.track_id: car for car in self.frames[self.current_frame_index].cars}
-            self._update_occupancy()
-
-    def clear_history(self):
-        self.frames.clear()
-        self.current_frame_index = 0
-        self._current_cars.clear()
-        self._current_occupancy.clear()
+    # # ====== История (без изменений) ======
+    #
+    # def get_frame(self, index: int) -> Optional[SceneFrame]:
+    #     if 0 <= index < len(self.frames):
+    #         return self.frames[index]
+    #     return None
+    #
+    # def get_current_frame(self) -> Optional[SceneFrame]:
+    #     return self.get_frame(self.current_frame_index)
+    #
+    # def next_frame(self):
+    #     if self.current_frame_index < len(self.frames) - 1:
+    #         self.current_frame_index += 1
+    #         self._current_cars = {car.track_id: car for car in self.frames[self.current_frame_index].cars}
+    #         self._update_occupancy()
+    #
+    # def prev_frame(self):
+    #     if self.current_frame_index > 0:
+    #         self.current_frame_index -= 1
+    #         self._current_cars = {car.track_id: car for car in self.frames[self.current_frame_index].cars}
+    #         self._update_occupancy()
+    #
+    # def clear_history(self):
+    #     self.frames.clear()
+    #     self.current_frame_index = 0
+    #     self._current_cars.clear()
+    #     self._current_occupancy.clear()

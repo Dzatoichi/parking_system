@@ -1,10 +1,14 @@
-import React, { useMemo, useState, useEffect } from "react";
-import { Accessibility, RefreshCw, Filter, MapPin, X } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Filter, MapPin, Play, RefreshCw, Square, X } from "lucide-react";
 
-import { vehicleApi, type VehicleRead } from "../services/pmApi";
-
+import {
+  cvMonitoringApi,
+  type SpotRead,
+  type SpotStatus,
+} from "../services/pmApi";
+import { getApiErrorMessage } from "../lib/api";
 import { useParkingMapData } from "../hooks/useParkingMapData";
-import type { SpotRead, SpotStatus } from "../services/pmApi";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -18,13 +22,13 @@ const STATUS_LABELS: Record<SpotStatus, string> = {
 };
 
 const SPOT_FILL: Record<SpotStatus, string> = {
-  free:     "#bbf7d0",
+  free: "#bbf7d0",
   occupied: "#fecaca",
   reserved: "#fef08a",
 };
 
 const SPOT_STROKE: Record<SpotStatus, string> = {
-  free:     "#16a34a",
+  free: "#16a34a",
   occupied: "#dc2626",
   reserved: "#ca8a04",
 };
@@ -33,45 +37,52 @@ function toPolygonPoints(points: number[][]): string {
   return points.map(([x, y]) => `${x},${y}`).join(" ");
 }
 
-function VehicleInfo({ vehicleId }: { vehicleId: number }) {
-  const [vehicle, setVehicle] = useState<VehicleRead | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    vehicleApi.getById(vehicleId)
-      .then((r) => setVehicle(r.data))
-      .catch(() => setVehicle(null))
-      .finally(() => setLoading(false));
-  }, [vehicleId]);
-
-  if (loading) return <p className="text-sm text-gray-400">Загрузка...</p>;
-  if (!vehicle) return <p className="text-sm text-gray-400">ТС #{vehicleId}</p>;
-
-  return (
-    <div className="space-y-0.5">
-      <p className="text-sm font-medium text-gray-900">{vehicle.plate_number}</p>
-      <p className="text-xs text-gray-500">ID: #{vehicle.id}</p>
-      {vehicle.last_seen && (
-        <p className="text-xs text-gray-500">
-          Последний раз: {new Date(vehicle.last_seen).toLocaleTimeString("ru-RU")}
-        </p>
-      )}
-      {vehicle.is_blocked && (
-        <p className="text-xs text-red-600 font-medium">⚠ ТС заблокировано</p>
-      )}
-    </div>
-  );
+function statusClass(status?: string) {
+  if (status === "monitoring") return "text-green-700 bg-green-50 border-green-200";
+  if (status === "markup") return "text-yellow-700 bg-yellow-50 border-yellow-200";
+  return "text-gray-700 bg-gray-50 border-gray-200";
 }
 
 export function ParkingMap() {
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<SpotFilter>("all");
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [selectedParkingId, setSelectedParkingId] = useState<number | null>(null);
   const [selectedSpot, setSelectedSpot] = useState<SpotRead | null>(null);
-  const { error, loading, parking, refetch, spots } = useParkingMapData();
+  const [monitorActionError, setMonitorActionError] = useState<string | null>(null);
+
+  const { error, loading, parking, parkings, refetch, spots } = useParkingMapData(selectedParkingId);
+
+  const monitoringQuery = useQuery({
+    queryKey: ["cvMonitoringStatus"],
+    queryFn: () => cvMonitoringApi.getStatus(),
+    refetchInterval: 2_000,
+    retry: false,
+  });
+
+  const monitoring = monitoringQuery.data?.data;
+  const refreshMonitoring = () => {
+    setMonitorActionError(null);
+    return queryClient.invalidateQueries({ queryKey: ["cvMonitoringStatus"] });
+  };
+  const showMonitorError = (err: unknown) => {
+    setMonitorActionError(getApiErrorMessage(err, "Не удалось выполнить команду мониторинга"));
+  };
+
+  const startMonitoring = useMutation({
+    mutationFn: () => cvMonitoringApi.start(),
+    onSuccess: refreshMonitoring,
+    onError: showMonitorError,
+  });
+  const stopMonitoring = useMutation({
+    mutationFn: () => cvMonitoringApi.stop(),
+    onSuccess: refreshMonitoring,
+    onError: showMonitorError,
+  });
 
   const handleRefresh = async () => {
     await refetch();
+    await refreshMonitoring();
     setLastRefresh(new Date());
   };
 
@@ -85,25 +96,44 @@ export function ParkingMap() {
     [filter, spots],
   );
 
-  const disabledSpots = useMemo(
-    () => spots.filter((spot) => spot.spot_type === "disabled"),
-    [spots],
-  );
+  const occupiedCount = spots.filter((s) => s.spot_status === "occupied").length;
+  const reservedCount = spots.filter((s) => s.spot_status === "reserved").length;
+  const freeCount = spots.filter((s) => s.spot_status === "free").length;
+  const busy = startMonitoring.isPending || stopMonitoring.isPending;
+  const monitorError = monitorActionError || getApiErrorMessage(monitoringQuery.error, "");
 
   return (
-    <div className="space-y-6">
-
-      {/* Заголовок и фильтры */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">Карта парковки</h1>
-          <p className="text-gray-600">
-            {parking ? `${parking.name}, ${parking.address}` : "Визуализация парковки в реальном времени"}
+          <h1 className="text-2xl font-semibold text-gray-900">Карта парковки</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            {parking ? `${parking.name}, ${parking.address}` : "Визуализация мест в реальном времени"}
           </p>
         </div>
-        <div className="flex items-center space-x-4">
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={String(parking?.id ?? "")}
+            onValueChange={(value) => {
+              setSelectedParkingId(Number(value));
+              setSelectedSpot(null);
+            }}
+          >
+            <SelectTrigger className="w-64">
+              <SelectValue placeholder="Парковка" />
+            </SelectTrigger>
+            <SelectContent>
+              {parkings.map((item) => (
+                <SelectItem key={item.id} value={String(item.id)}>
+                  {item.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Select value={filter} onValueChange={(v) => setFilter(v as SpotFilter)}>
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-48">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue placeholder="Фильтр мест" />
             </SelectTrigger>
@@ -115,34 +145,71 @@ export function ParkingMap() {
               <SelectItem value="disabled">Для инвалидов</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={handleRefresh} variant="outline" className="flex items-center space-x-2">
+
+          <Button onClick={handleRefresh} variant="outline" className="gap-2">
             <RefreshCw className="w-4 h-4" />
-            <span>Обновить</span>
+            Обновить
           </Button>
         </div>
       </div>
 
+      <Card className="p-4 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`px-3 py-1.5 rounded-md border text-sm font-medium ${statusClass(monitoring?.mode)}`}>
+              CV: {monitoringQuery.isLoading ? "проверка" : monitoring?.mode ?? "offline"}
+            </span>
+            <span className="text-sm text-gray-600">
+              Камер: {monitoring?.monitor?.cameras ?? 0}, процессоров: {monitoring?.monitor?.active_processors ?? 0}
+            </span>
+            <span className="text-sm text-gray-600">
+              Кадров: {monitoring?.monitor?.stats?.total_frames_processed ?? 0}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => startMonitoring.mutate()}
+              disabled={busy || monitoring?.running || monitoring?.mode === "markup"}
+              className="gap-2 bg-green-600 hover:bg-green-700"
+            >
+              <Play className="w-4 h-4" />
+              Старт
+            </Button>
+            <Button
+              onClick={() => stopMonitoring.mutate()}
+              disabled={busy || !monitoring?.running}
+              variant="outline"
+              className="gap-2"
+            >
+              <Square className="w-4 h-4" />
+              Стоп
+            </Button>
+          </div>
+        </div>
+        {monitorError && <p className="text-sm text-red-600 mt-3">{monitorError}</p>}
+      </Card>
+
       {loading && <p className="text-sm text-gray-500">Загрузка данных...</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="grid grid-cols-4 gap-8">
-
-        {/* SVG-карта */}
-        <div className="col-span-3 space-y-3">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5">
+        <div className="space-y-4">
           <Card className="p-4 bg-white shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Схема парковки</h3>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold text-gray-900">Схема мест</h3>
               <p className="text-sm text-gray-500">
                 Обновлено: {lastRefresh.toLocaleTimeString("ru-RU")}
               </p>
             </div>
 
-            <div className="overflow-auto rounded-lg border border-gray-100 bg-gray-50">
-              <svg
-                viewBox="0 0 1000 800"
-                width="100%"
-                style={{ minHeight: 400, display: "block" }}
-              >
+            <div className="overflow-auto rounded-md border border-gray-100 bg-gray-50">
+              <svg viewBox="0 0 1000 800" width="100%" style={{ minHeight: 440, display: "block" }}>
+                <rect x="60" y="70" width="880" height="660" rx="8" fill="#f8fafc" stroke="#e5e7eb" />
+                <text x="740" y="120" textAnchor="middle" fontSize="14" fill="#64748b">
+                  тестовая камера Сергея
+                </text>
+                <line x1="520" y1="120" x2="520" y2="660" stroke="#cbd5e1" strokeWidth="4" strokeDasharray="12 12" />
+
                 {filteredSpots.map((spot) => {
                   const coords = spot.spot_coordinates;
                   if (!coords?.points?.length) return null;
@@ -150,7 +217,6 @@ export function ParkingMap() {
                   const isDisabled = spot.spot_type === "disabled";
                   const fill = SPOT_FILL[spot.spot_status] ?? "#e5e7eb";
                   const stroke = isDisabled ? "#2563eb" : (SPOT_STROKE[spot.spot_status] ?? "#9ca3af");
-                  const strokeWidth = isDisabled ? 2.5 : 1.5;
                   const isSelected = selectedSpot?.id === spot.id;
 
                   return (
@@ -162,37 +228,33 @@ export function ParkingMap() {
                       <polygon
                         points={toPolygonPoints(coords.points)}
                         fill={fill}
-                        stroke={isSelected ? "#6366f1" : stroke}
-                        strokeWidth={isSelected ? 3 : strokeWidth}
-                        opacity={0.9}
+                        stroke={isSelected ? "#2563eb" : stroke}
+                        strokeWidth={isSelected ? 4 : 2}
+                        opacity={0.95}
                       />
-                      {/* Номер места */}
                       <text
                         x={coords.center_x}
-                        y={coords.center_y - 4}
+                        y={coords.center_y - 10}
                         textAnchor="middle"
                         dominantBaseline="central"
-                        fontSize={10}
-                        fontWeight={600}
-                        fill="#1f2937"
+                        fontSize={18}
+                        fontWeight={700}
+                        fill="#111827"
                         pointerEvents="none"
                       >
                         {spot.spot_number}
                       </text>
-                      {/* Иконка инвалида */}
-                      {isDisabled && (
-                        <text
-                          x={coords.center_x}
-                          y={coords.center_y + 10}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fontSize={10}
-                          fill="#2563eb"
-                          pointerEvents="none"
-                        >
-                          ♿
-                        </text>
-                      )}
+                      <text
+                        x={coords.center_x}
+                        y={coords.center_y + 18}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={14}
+                        fill="#374151"
+                        pointerEvents="none"
+                      >
+                        {STATUS_LABELS[spot.spot_status]}
+                      </text>
                     </g>
                   );
                 })}
@@ -201,175 +263,86 @@ export function ParkingMap() {
           </Card>
 
           {selectedSpot && (
-              <Card className="p-4 bg-white shadow-sm border-l-4 border-indigo-500">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <p className="font-semibold text-gray-900 text-base">
-                      Место {selectedSpot.spot_number}
-                    </p>
+            <Card className="p-4 bg-white shadow-sm border-l-4 border-blue-600">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="font-semibold text-gray-900">Место {selectedSpot.spot_number}</p>
+                  <p className="text-sm text-gray-600">
+                    Статус: <span className="font-medium">{STATUS_LABELS[selectedSpot.spot_status]}</span>
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    ID места: {selectedSpot.id}
+                  </p>
+                  {selectedSpot.current_vehicle_id && (
                     <p className="text-sm text-gray-600">
-                      Статус:{" "}
-                      <span className="font-medium">
-                        {STATUS_LABELS[selectedSpot.spot_status] ?? selectedSpot.spot_status}
-                      </span>
+                      ТС: #{selectedSpot.current_vehicle_id}
                     </p>
-                    <p className="text-sm text-gray-600">
-                      Тип:{" "}
-                      <span className="font-medium">
-                        {selectedSpot.spot_type === "disabled" ? "Для инвалидов" : "Стандартное"}
-                      </span>
-                    </p>
-
-                    {/* Блок ТС */}
-                    {selectedSpot.spot_status === "occupied" && (
-                      <div className="mt-2 pt-2 border-t border-gray-100">
-                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                          Транспортное средство
-                        </p>
-                        {selectedSpot.current_vehicle_id ? (
-                          <VehicleInfo vehicleId={selectedSpot.current_vehicle_id} />
-                        ) : (
-                          <p className="text-sm text-gray-400">Нет данных о ТС</p>
-                        )}
-                      </div>
-                    )}
-
-                    {selectedSpot.spot_status === "reserved" && (
-                      <p className="text-sm text-yellow-700 font-medium">⏱ Активная бронь</p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setSelectedSpot(null)}
-                    className="text-gray-400 hover:text-gray-600 ml-4"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  )}
                 </div>
-              </Card>
-            )}
+                <button onClick={() => setSelectedSpot(null)} className="text-gray-400 hover:text-gray-700">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </Card>
+          )}
         </div>
 
-        {/* Боковая панель */}
-        <div className="space-y-6">
-
-          {/* Обозначения */}
-          <Card className="p-6 bg-white shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Обозначения</h3>
-            <div className="space-y-3">
-              <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 rounded-sm border-2 border-green-500 bg-green-100" />
-                <span className="text-sm">
-                  Свободно ({spots.filter((s) => s.spot_status === "free").length})
-                </span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 rounded-sm border-2 border-red-500 bg-red-100" />
-                <span className="text-sm">
-                  Занято ({spots.filter((s) => s.spot_status === "occupied").length})
-                </span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 rounded-sm border-2 border-yellow-500 bg-yellow-100" />
-                <span className="text-sm">
-                  Забронировано ({spots.filter((s) => s.spot_status === "reserved").length})
-                </span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 rounded-sm border-2 border-blue-600 bg-green-100" />
-                <span className="text-sm">
-                  Для инвалидов ({disabledSpots.length})
-                </span>
-              </div>
-            </div>
-          </Card>
-
-          {/* Статистика */}
-          <Card className="p-6 bg-white shadow-sm">
+        <div className="space-y-4">
+          <Card className="p-5 bg-white shadow-sm">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Статистика</h3>
             <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Всего мест</span>
-                <span className="text-sm font-semibold">{spots.length}</span>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Всего мест</span>
+                <span className="font-semibold">{spots.length}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Свободно</span>
-                <span className="text-sm font-semibold text-green-700">
-                  {spots.filter((s) => s.spot_status === "free").length}
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Свободно</span>
+                <span className="font-semibold text-green-700">{freeCount}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Занято</span>
+                <span className="font-semibold text-red-700">{occupiedCount}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Бронь</span>
+                <span className="font-semibold text-yellow-700">{reservedCount}</span>
+              </div>
+              <div className="border-t border-gray-100 pt-3 flex justify-between text-sm">
+                <span className="text-gray-600">Заполненность</span>
+                <span className="font-semibold">
+                  {spots.length ? `${Math.round(((occupiedCount + reservedCount) / spots.length) * 100)}%` : "-"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Занято</span>
-                <span className="text-sm font-semibold text-red-700">
-                  {spots.filter((s) => s.spot_status === "occupied").length}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Забронировано</span>
-                <span className="text-sm font-semibold text-yellow-700">
-                  {spots.filter((s) => s.spot_status === "reserved").length}
-                </span>
-              </div>
-              <div className="border-t border-gray-100 pt-3">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-600">Заполненность</span>
-                  <span className="text-sm font-semibold">
-                    {spots.length
-                      ? `${Math.round(
-                          ((spots.filter((s) => s.spot_status === "occupied").length +
-                            spots.filter((s) => s.spot_status === "reserved").length) /
-                            spots.length) * 100
-                        )}%`
-                      : "—"}
+            </div>
+          </Card>
+
+          <Card className="p-5 bg-white shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Места</h3>
+            <div className="space-y-2">
+              {spots.map((spot) => (
+                <button
+                  key={spot.id}
+                  onClick={() => setSelectedSpot(spot)}
+                  className="w-full flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 text-left hover:bg-gray-50"
+                >
+                  <span className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm font-medium text-gray-900">{spot.spot_number}</span>
                   </span>
-                </div>
-              </div>
-              <div className="border-t border-gray-100 pt-3 space-y-1">
-                <p className="text-xs font-medium text-gray-700 mb-2">Места для инвалидов</p>
-                <div className="flex justify-between text-xs text-gray-600">
-                  <span>Свободно</span>
-                  <span>{disabledSpots.filter((s) => s.spot_status === "free").length}</span>
-                </div>
-                <div className="flex justify-between text-xs text-gray-600">
-                  <span>Занято</span>
-                  <span>{disabledSpots.filter((s) => s.spot_status === "occupied").length}</span>
-                </div>
-                <div className="flex justify-between text-xs text-gray-600">
-                  <span>Бронь</span>
-                  <span>{disabledSpots.filter((s) => s.spot_status === "reserved").length}</span>
-                </div>
-              </div>
+                  <span className={`text-xs font-medium ${
+                    spot.spot_status === "occupied"
+                      ? "text-red-700"
+                      : spot.spot_status === "reserved"
+                        ? "text-yellow-700"
+                        : "text-green-700"
+                  }`}>
+                    {STATUS_LABELS[spot.spot_status]}
+                  </span>
+                </button>
+              ))}
+              {spots.length === 0 && <p className="text-sm text-gray-400">Нет мест для выбранной парковки</p>}
             </div>
           </Card>
-
-          {/* Активные ТС */}
-          <Card className="p-6 bg-white shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Активные ТС</h3>
-            <div className="space-y-3">
-              {spots
-                .filter((spot) => spot.spot_status === "occupied")
-                .slice(0, 5)
-                .map((spot) => (
-                  <div
-                    key={spot.id}
-                    className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50 rounded px-1"
-                    onClick={() => setSelectedSpot(spot)}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <MapPin className="w-4 h-4 text-gray-400" />
-                      <div>
-                        <p className="text-sm font-medium">ТС #{spot.current_vehicle_id ?? "—"}</p>
-                        <p className="text-xs text-gray-600">Место {spot.spot_number}</p>
-                      </div>
-                    </div>
-                    <span className="text-xs text-gray-500">занято</span>
-                  </div>
-                ))}
-              {spots.filter((s) => s.spot_status === "occupied").length === 0 && (
-                <p className="text-sm text-gray-400">Нет активных ТС</p>
-              )}
-            </div>
-          </Card>
-
         </div>
       </div>
     </div>

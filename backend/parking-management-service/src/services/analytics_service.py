@@ -9,6 +9,7 @@ from src.models.parkings import ParkingBase
 from src.models.cameras import Cameras
 from src.models.spots import Spot
 from src.models.status.spot_status import SpotStatus
+from src.models.system_events import SystemEvent
 from src.models.tracking import Tracking
 from src.models.vehicles import Vehicles
 from src.schemas import (
@@ -160,7 +161,20 @@ class AnalyticsService:
             "leave_spot": "Авто покинуло место",
             "pass": "Транзит через парковку",
         }
-        recent_events = [
+        system_event_rows = (
+            await self._session.execute(
+                select(SystemEvent)
+                .where(
+                    SystemEvent.parking_id == parking_id,
+                    SystemEvent.entity_type == "booking",
+                    SystemEvent.created_at >= start_week,
+                )
+                .order_by(SystemEvent.created_at.desc(), SystemEvent.id.desc())
+                .limit(7)
+            )
+        ).scalars().all()
+
+        tracking_recent_events = [
             RecentEvent(
                 type=row.event_type,
                 plate=row.plate_number,
@@ -168,6 +182,32 @@ class AnalyticsService:
                 action=action_map.get(row.event_type, row.event_type),
             )
             for row in tracking_rows[:7]
+        ]
+        system_recent_events = [
+            RecentEvent(
+                type=event.event_type,
+                plate=f"Booking #{event.entity_id}",
+                time=event.created_at.astimezone().strftime("%H:%M"),
+                action=event.message,
+            )
+            for event in system_event_rows
+        ]
+        recent_events = [
+            event
+            for _, event in sorted(
+                [
+                    *(
+                        (row.timestamp, event)
+                        for row, event in zip(tracking_rows[:7], tracking_recent_events)
+                    ),
+                    *(
+                        (row.created_at, event)
+                        for row, event in zip(system_event_rows, system_recent_events)
+                    ),
+                ],
+                key=lambda item: item[0].timestamp(),
+                reverse=True,
+            )[:7]
         ]
 
         mini_spots = [

@@ -1,12 +1,10 @@
-from dataclasses import dataclass
-
 import cv2
 import numpy as np
 from ultralytics import YOLO
 from collections import deque
 from typing import List, Optional
 
-from a1.scene3d import CarDetection
+from parking_monitor.core.scene3d import CarDetection
 
 
 class DirectionTracker:

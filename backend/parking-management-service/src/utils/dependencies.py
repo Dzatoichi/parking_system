@@ -125,6 +125,7 @@ async def get_booking_service(
         parking_dao: ParkingDAO = Depends(get_parking_dao),
         projection_dao: BookingProjectionDAO = Depends(get_booking_projection_dao),
         event_broker: BookingEventBroker = Depends(get_booking_event_broker),
+        event_dao: EventDAO = Depends(get_event_dao),
 ) -> BookingService:
     return BookingService(
         booking_dao=booking_dao,
@@ -132,6 +133,7 @@ async def get_booking_service(
         parking_dao=parking_dao,
         projection_dao=projection_dao,
         event_broker=event_broker,
+        event_dao=event_dao,
     )
 
 async def get_booking_projection_service(

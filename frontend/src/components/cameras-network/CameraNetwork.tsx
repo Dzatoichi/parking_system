@@ -5,12 +5,22 @@ import {
   Camera,
   Check,
   LayoutDashboard,
+  MousePointer2,
   Pencil,
+  Play,
   Plus,
+  Square,
   Trash2,
   X,
 } from "lucide-react";
-import { cameraApi, parkingApi, type CameraRead, type ParkingRead } from "../../services/pmApi";
+import {
+  cameraApi,
+  cvMonitoringApi,
+  parkingApi,
+  type CameraRead,
+  type ParkingRead,
+} from "../../services/pmApi";
+import { getApiErrorMessage } from "../../lib/api";
 
 type CameraView = "dashboard" | "cameras";
 
@@ -64,13 +74,56 @@ export function CameraNetwork() {
 }
 
 function CamerasDashboard() {
+  const qc = useQueryClient();
+  const [monitorActionError, setMonitorActionError] = useState<string | null>(null);
   const { data: parkingsResp } = useQuery({
     queryKey: ["parkings"],
     queryFn: () => parkingApi.getAll({ page: 1, size: 200 }),
     retry: false,
   });
+  const { data: monitoringResp, error: monitoringError, isLoading: monitoringLoading } = useQuery({
+    queryKey: ["cvMonitoringStatus"],
+    queryFn: () => cvMonitoringApi.getStatus(),
+    refetchInterval: 5000,
+    retry: false,
+  });
 
   const parkings = parkingsResp?.data?.items ?? [];
+  const monitoring = monitoringResp?.data;
+  const refreshMonitoring = () => {
+    setMonitorActionError(null);
+    return qc.invalidateQueries({ queryKey: ["cvMonitoringStatus"] });
+  };
+  const showMonitorError = (error: unknown) => {
+    setMonitorActionError(getApiErrorMessage(error, "Не удалось выполнить команду CV-мониторинга"));
+  };
+  const startMonitoring = useMutation({
+    mutationFn: () => cvMonitoringApi.start(),
+    onSuccess: refreshMonitoring,
+    onError: showMonitorError,
+  });
+  const stopMonitoring = useMutation({
+    mutationFn: () => cvMonitoringApi.stop(),
+    onSuccess: refreshMonitoring,
+    onError: showMonitorError,
+  });
+  const beginMarkup = useMutation({
+    mutationFn: () => cvMonitoringApi.beginMarkup(),
+    onSuccess: refreshMonitoring,
+    onError: showMonitorError,
+  });
+  const finishMarkup = useMutation({
+    mutationFn: () => cvMonitoringApi.finishMarkup(),
+    onSuccess: refreshMonitoring,
+    onError: showMonitorError,
+  });
+  const monitorErrorText =
+    monitorActionError || getApiErrorMessage(monitoringError, "");
+  const monitorBusy =
+    startMonitoring.isPending ||
+    stopMonitoring.isPending ||
+    beginMarkup.isPending ||
+    finishMarkup.isPending;
 
   return (
     <div className="space-y-6">
@@ -81,6 +134,59 @@ function CamerasDashboard() {
         <p className="text-sm text-gray-500 mt-1">
           Камеры в разрезе парковок
         </p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-gray-500">CV мониторинг</p>
+            <p className="text-lg font-semibold text-gray-900 mt-1">
+              {monitoringLoading ? "Проверка..." : monitoring?.mode ?? "offline"}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Камер: {monitoring?.monitor?.cameras ?? 0}, активных процессоров:{" "}
+              {monitoring?.monitor?.active_processors ?? 0}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => startMonitoring.mutate()}
+              disabled={monitorBusy || monitoring?.mode === "markup" || monitoring?.running}
+              className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              <Play className="w-4 h-4" />
+              <span>Старт</span>
+            </button>
+            <button
+              onClick={() => stopMonitoring.mutate()}
+              disabled={monitorBusy || !monitoring?.running}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50"
+            >
+              <Square className="w-4 h-4" />
+              <span>Стоп</span>
+            </button>
+            <button
+              onClick={() => beginMarkup.mutate()}
+              disabled={monitorBusy || monitoring?.running || monitoring?.mode === "markup"}
+              className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              <MousePointer2 className="w-4 h-4" />
+              <span>Разметка</span>
+            </button>
+            <button
+              onClick={() => finishMarkup.mutate()}
+              disabled={monitorBusy || monitoring?.mode !== "markup"}
+              className="px-3 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              Готово
+            </button>
+          </div>
+        </div>
+        {monitorErrorText && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {monitorErrorText}
+          </div>
+        )}
       </div>
 
       {parkings.length === 0 ? (

@@ -4,6 +4,8 @@ pydantic
 pydantic-settings
 httpx
 aio-pika
+psycopg2-binary
 numpy
 opencv-python-headless
-ultralytics==8.2.0
+ultralytics==8.3.0
+lapx>=0.5.2

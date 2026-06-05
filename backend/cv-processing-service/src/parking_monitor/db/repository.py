@@ -10,7 +10,7 @@ from psycopg2 import pool, sql
 from psycopg2.extras import RealDictCursor
 from psycopg2 import errors as psycopg2_errors
 
-from .models import (
+from parking_monitor.db.models import (
     Camera, SegmentsConfig, ParkingContainer, CameraCalibration,
     CameraConnection, OccupancyRecord
 )
@@ -605,7 +605,7 @@ class ParkingRepository:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("""
                         SELECT id, container_id, camera_matrix, rvec, tvec, dist_coeffs, image_shape, homography, created_at
-                        FROM camera_calibration
+                        FROM camera_calibrations
                         WHERE container_id = %s
                     """, (container_id,))
                     row = cursor.fetchone()
@@ -658,7 +658,7 @@ class ParkingRepository:
                         homography_json = json.dumps(homography.tolist()) if homography is not None else None
 
                         cursor.execute("""
-                            INSERT INTO camera_calibration 
+                            INSERT INTO camera_calibrations
                             (container_id, camera_matrix, rvec, tvec, dist_coeffs, image_shape, homography)
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
                             RETURNING id, container_id, camera_matrix, rvec, tvec, dist_coeffs, image_shape, homography, 
@@ -712,7 +712,7 @@ class ParkingRepository:
             return existing
 
         values.append(container_id)
-        update_query = f"UPDATE camera_calibration SET {', '.join(update_fields)} WHERE container_id = %s RETURNING *"
+        update_query = f"UPDATE camera_calibrations SET {', '.join(update_fields)} WHERE container_id = %s RETURNING *"
 
         with self._get_connection() as conn:
             try:
@@ -739,7 +739,7 @@ class ParkingRepository:
             try:
                 with self._transaction(conn):
                     with conn.cursor() as cursor:
-                        cursor.execute("DELETE FROM camera_calibration WHERE container_id = %s", (container_id,))
+                        cursor.execute("DELETE FROM camera_calibrations WHERE container_id = %s", (container_id,))
                         deleted = cursor.rowcount > 0
                         if deleted:
                             logger.info(f"Deleted calibration for container {container_id}")
@@ -838,6 +838,46 @@ class ParkingRepository:
             except Exception as e:
                 logger.error(f"Error marking spot {spot_id} as free: {e}", exc_info=True)
                 raise RepositoryError(f"Failed to mark spot as free: {e}")
+
+    def update_current_spot(self, spot_id: int, status: str,
+                            vehicle_track_id: Optional[int] = None,
+                            parked_since: Optional[datetime] = None):
+        """Обновляет текущее состояние места в БД"""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO parking_spots_current (spot_id, status, vehicle_track_id, parked_since, last_updated)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (spot_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        vehicle_track_id = EXCLUDED.vehicle_track_id,
+                        parked_since = EXCLUDED.parked_since,
+                        last_updated = NOW()
+                """, (spot_id, status, vehicle_track_id, parked_since))
+                conn.commit()
+
+    def initialize_all_spots(self):
+        """Гарантирует, что для каждого parking_containers есть запись в parking_spots_current"""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO parking_spots_current (spot_id, status)
+                    SELECT id, 'free'
+                    FROM parking_containers
+                    ON CONFLICT (spot_id) DO NOTHING
+                """)
+                conn.commit()
+
+    def get_current_spot_statuses(self) -> Dict[int, Tuple[str, Optional[int], Optional[datetime]]]:
+        """Возвращает {spot_id: (status, vehicle_track_id, parked_since)} для инициализации"""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT spot_id, status, vehicle_track_id, parked_since FROM parking_spots_current")
+                rows = cur.fetchall()
+                return {
+                    row['spot_id']: (row['status'], row['vehicle_track_id'], row['parked_since'])
+                    for row in rows
+                }
 
     def get_current_occupancy(self) -> List[OccupancyRecord]:
         """Возвращает текущую занятость"""
@@ -1152,3 +1192,4 @@ class ParkingRepository:
             except Exception as e:
                 logger.error(f"Error getting database stats: {e}", exc_info=True)
                 raise RepositoryError(f"Failed to get database stats: {e}")
+

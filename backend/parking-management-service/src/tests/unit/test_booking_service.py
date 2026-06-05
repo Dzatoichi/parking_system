@@ -1,7 +1,8 @@
 """tests/unit/test_booking_service.py"""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -42,6 +43,7 @@ class _Booking:
         now = datetime.now(tz=timezone.utc)
         self.id = booking_id
         self.user_id = 123
+        self.vehicle_id = None
         self.spot_id = spot_id
         self.status = status
         self.start_time = now
@@ -52,32 +54,35 @@ class _Booking:
         self.cancellation_reason = None
 
 
-def _make_service() -> tuple[BookingService, AsyncMock]:
-    session = AsyncMock()
-    session.commit = AsyncMock()
-    async def _refresh(obj) -> None:
-        now = datetime.now(tz=timezone.utc)
-        if getattr(obj, "id", None) is None:
-            obj.id = 1
-        if getattr(obj, "created_at", None) is None:
-            obj.created_at = now
-        if getattr(obj, "updated_at", None) is None:
-            obj.updated_at = now
-    session.refresh = AsyncMock(side_effect=_refresh)
-    session.add = Mock()
-    service = BookingService(session)
-    service._booking_dao = AsyncMock()
-    service._spot_dao = AsyncMock()
-    service._parking_dao = AsyncMock()
+def _make_service() -> tuple[BookingService, SimpleNamespace]:
+    deps = SimpleNamespace(
+        booking_dao=AsyncMock(),
+        spot_dao=AsyncMock(),
+        parking_dao=AsyncMock(),
+        projection_dao=AsyncMock(),
+        event_broker=AsyncMock(),
+        event_dao=AsyncMock(),
+    )
+    service = BookingService(
+        booking_dao=deps.booking_dao,
+        spot_dao=deps.spot_dao,
+        parking_dao=deps.parking_dao,
+        projection_dao=deps.projection_dao,
+        event_broker=deps.event_broker,
+        event_dao=deps.event_dao,
+    )
     service._sync_parking_available_spots = AsyncMock()
     service._sync_spot_status_after_booking_change = AsyncMock()
-    return service, session
+    deps.booking_dao.create.return_value = _Booking()
+    deps.booking_dao.get_by_id.return_value = _Booking()
+    deps.projection_dao.get_by_booking_id.return_value = None
+    return service, deps
 
 
 class TestCreateBooking:
     @pytest.mark.asyncio
     async def test_creates_booking_and_reserves_spot(self) -> None:
-        service, session = _make_service()
+        service, deps = _make_service()
         service._spot_dao.get_by_id.return_value = _Spot()
         service._booking_dao.get_conflicting_bookings.return_value = []
 
@@ -96,7 +101,8 @@ class TestCreateBooking:
             SpotStatus.RESERVED,
             vehicle_id=None,
         )
-        session.commit.assert_awaited_once()
+        deps.booking_dao.create.assert_awaited_once()
+        deps.event_dao.create.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_raises_404_when_spot_missing(self) -> None:
@@ -137,8 +143,12 @@ class TestCreateBooking:
 class TestUpdateBooking:
     @pytest.mark.asyncio
     async def test_confirms_pending_booking(self) -> None:
-        service, session = _make_service()
-        service._booking_dao.get_by_id.return_value = _Booking(status=BookingStatus.PENDING)
+        service, deps = _make_service()
+        existing = _Booking(status=BookingStatus.PENDING)
+        updated = _Booking(status=BookingStatus.CONFIRMED)
+        service._booking_dao.get_by_id.side_effect = [existing, updated]
+        service._booking_dao.update.return_value = updated
+        service._spot_dao.get_by_id.return_value = _Spot()
 
         result = await service.update_booking(
             1,
@@ -146,13 +156,18 @@ class TestUpdateBooking:
         )
 
         assert result.status == BookingStatus.CONFIRMED
-        session.commit.assert_awaited_once()
+        deps.booking_dao.update.assert_awaited_once()
+        deps.event_dao.create.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_cancels_booking_and_syncs_spot(self) -> None:
-        service, session = _make_service()
+        service, deps = _make_service()
         booking = _Booking(status=BookingStatus.CONFIRMED)
-        service._booking_dao.get_by_id.return_value = booking
+        updated = _Booking(status=BookingStatus.CANCELLED)
+        updated.cancellation_reason = "user request"
+        service._booking_dao.get_by_id.side_effect = [booking, updated]
+        service._booking_dao.update.return_value = updated
+        service._spot_dao.get_by_id.return_value = _Spot()
         service._sync_spot_status_after_booking_change = AsyncMock()
 
         result = await service.update_booking(
@@ -166,7 +181,8 @@ class TestUpdateBooking:
         assert result.status == BookingStatus.CANCELLED
         assert result.cancellation_reason == "user request"
         service._sync_spot_status_after_booking_change.assert_awaited_once_with(booking.spot_id)
-        session.commit.assert_awaited_once()
+        deps.booking_dao.update.assert_awaited_once()
+        deps.event_dao.create.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_raises_409_when_confirming_non_pending(self) -> None:

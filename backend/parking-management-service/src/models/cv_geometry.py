@@ -88,3 +88,27 @@ class CVSpotObservation(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ParkingSpotCurrent(Base):
+    __tablename__ = "parking_spots_current"
+
+    spot_id: Mapped[int] = mapped_column(ForeignKey("parking_containers.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="free", index=True)
+    vehicle_track_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parked_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    container: Mapped["ParkingContainer"] = relationship("ParkingContainer")
+
+
+class SpotOccupancy(Base):
+    __tablename__ = "spot_occupancy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    spot_id: Mapped[int] = mapped_column(ForeignKey("parking_containers.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehicle_track_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    occupied_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    occupied_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    container: Mapped["ParkingContainer"] = relationship("ParkingContainer")

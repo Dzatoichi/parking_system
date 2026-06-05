@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     CV_OCCUPANCY_DEBOUNCE_SECONDS: float = 3.0
     CV_DEFAULT_FPS: float = 10.0
     YOLO_MODEL_PATH: str = "yolo11n.pt"
+    PARKING_DB_NAME: str = "parking_db"
+    PARKING_DB_USER: str = "parking_user"
+    PARKING_DB_PASSWORD: str = "parking_pass"
+    PARKING_DB_HOST: str = "postgres-parking"
+    PARKING_DB_PORT: int = 5432
+    PARKING_DB_POOL_MIN: int = 1
+    PARKING_DB_POOL_MAX: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

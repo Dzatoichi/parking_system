@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Optional, Tuple, Dict, Any
 import json
 import logging
@@ -10,6 +11,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+class SpotStatus(Enum):
+    FREE = "free"
+    PARKING_PENDING = "parking_pending"   # замечен автомобиль, но ещё не подтверждён
+    PARKING_CONFIRMED = "parking_confirmed"
+
+@dataclass
+class ParkingSpotState:
+    spot_id: int
+    status: SpotStatus = SpotStatus.FREE
+    vehicle_track_id: Optional[int] = None
+    first_seen_time: Optional[float] = None   # timestamp первого появления на этом месте
+    last_seen_time: Optional[float] = None
+    confirmed_time: Optional[datetime] = None  # когда подтвердили парковку
+    consecutive_frames: int = 0               # сколько кадров подряд стоит на месте
 
 @dataclass
 class Camera:

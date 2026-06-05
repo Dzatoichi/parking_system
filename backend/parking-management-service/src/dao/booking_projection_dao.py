@@ -52,6 +52,15 @@ class BookingProjectionDAO(BaseDAO[BookingProjection]):
             return row.scalar_one_or_none()
 
     @BaseDAO.with_exception
+    async def get_by_booking_ids(self, booking_ids: list[int]) -> dict[int, BookingProjection]:
+        if not booking_ids:
+            return {}
+
+        async with self._get_session() as session:
+            rows = await session.execute(select(self.model).where(self.model.booking_id.in_(booking_ids)))
+            return {item.booking_id: item for item in rows.scalars().all()}
+
+    @BaseDAO.with_exception
     async def get_paginated(
         self,
         *,

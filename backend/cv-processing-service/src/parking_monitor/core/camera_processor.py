@@ -5,12 +5,33 @@ import queue
 import time
 import cv2
 import numpy as np
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from ultralytics import YOLO
 
 from parking_monitor.core.scene3d import Scene3D, CarDetection
 from parking_monitor.core.ray_proj_new_seg import DirectionTracker, calculate_enhanced_center
+
+
+def _allow_trusted_yolo_checkpoint_load() -> None:
+    """Allow loading trusted Ultralytics checkpoints under PyTorch 2.6+."""
+    try:
+        import torch
+    except Exception:
+        return
+
+    if getattr(torch.load, "_parking_monitor_patched", False):
+        return
+
+    original_load = torch.load
+
+    def patched_load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original_load(*args, **kwargs)
+
+    patched_load._parking_monitor_patched = True
+    torch.load = patched_load
 
 
 @dataclass
@@ -35,16 +56,27 @@ class CameraProcessor:
             camera_id: int,
             video_path: str,
             scene_3d: Scene3D,
-            model_path: str = "yolo11n-seg.pt",
-            process_every_n: int = 3,  # обрабатывать каждый 3-й кадр
-            outgoing_queue: Optional[queue.Queue] = None
+            model_path: str = "best.pt",
+            process_every_n: int = 10,  # обрабатывать каждый 3-й кадр
+            outgoing_queue: Optional[queue.Queue] = None,
+            frame_callback: Optional[callable] = None  # новый параметр
     ):
         self.camera_id = camera_id
         self.video_path = video_path
         self.scene = scene_3d
         self.outgoing_queue = outgoing_queue
+        self.frame_callback = frame_callback
 
         # Модель YOLO
+        model_candidate = Path(model_path)
+        if not model_candidate.exists():
+            bundled_model = Path(__file__).resolve().parents[1] / model_path
+            if bundled_model.exists():
+                model_path = str(bundled_model)
+        self.model_path = model_path
+        tracker_path = Path(__file__).resolve().parents[1] / "vehicle_botsort_conf.yaml"
+        self.tracker_config_path = str(tracker_path) if tracker_path.exists() else "vehicle_botsort_conf.yaml"
+        _allow_trusted_yolo_checkpoint_load()
         self.model = YOLO(model_path)
 
         # Трекер направлений
@@ -165,19 +197,19 @@ class CameraProcessor:
             while True:  # обрабатываем все команды в очереди
                 cmd = self.incoming_queue.get_nowait()
 
-                if cmd['type'] == 'SEARCH_VEHICLE':
-                    # Начинаем искать конкретный автомобиль
-                    track_id = cmd['track_id']
-                    features = cmd.get('features')
-                    expected_segment = cmd.get('expected_segment')
-
-                    print(f"Camera {self.camera_id}: searching for vehicle {track_id}")
-                    # TODO: добавить в список поиска
-
-                elif cmd['type'] == 'STOP_SEARCH':
-                    track_id = cmd['track_id']
-                    print(f"Camera {self.camera_id}: stop searching for {track_id}")
-                    # TODO: убрать из списка поиска
+                # if cmd['type'] == 'SEARCH_VEHICLE':
+                #     # Начинаем искать конкретный автомобиль
+                #     track_id = cmd['track_id']
+                #     features = cmd.get('features')
+                #     expected_segment = cmd.get('expected_segment')
+                #
+                #     print(f"Camera {self.camera_id}: searching for vehicle {track_id}")
+                #     # TODO: добавить в список поиска
+                #
+                # elif cmd['type'] == 'STOP_SEARCH':
+                #     track_id = cmd['track_id']
+                #     print(f"Camera {self.camera_id}: stop searching for {track_id}")
+                #     # TODO: убрать из списка поиска
 
         except queue.Empty:
             pass
@@ -185,12 +217,91 @@ class CameraProcessor:
     def _process_frame(self, frame, timestamp):
         """Обрабатывает один кадр"""
         # Детекция YOLO
+
         results = self.model.track(
             frame,
-            classes=[2],  # только автомобили
+            conf=0.35,
+            iou=0.5,
+            tracker=self.tracker_config_path,
+            persist=True,
             verbose=False,
-            conf=0.5,
-            persist=True
+        )
+
+        # Извлекаем детекции
+        detections = []
+        active_tracks = set()
+        new_tracks_info = []  # для новых автомобилей
+
+        if (results[0].boxes is not None and
+                results[0].boxes.id is not None):
+
+            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
+            boxes = results[0].boxes.xyxy.cpu().numpy()
+
+            for i, (box, track_id) in enumerate(zip(boxes, track_ids)):
+                # Вычисляем центр по bbox
+                center_x = (box[0] + box[2]) / 2
+                center_y = (box[1] + box[3]) / 2
+                center_2d = np.array([center_x, center_y])
+
+                # Получаем направление (без изменений)
+                direction = self.tracker.update(track_id, center_2d)
+
+                # Создаём CarDetection (сегмент больше не нужен)
+                detections.append(CarDetection(
+                    track_id=int(track_id),
+                    center=center_2d,
+                    direction=direction
+                ))
+
+                # Если трек новый, запоминаем для реидентификации
+                # if track_id not in self.active_tracks:
+                #     # TODO: извлечь признаки для реидентификации
+                #     features = self._extract_features(frame, segment_scaled)
+                #     new_tracks_info.append((track_id, features))
+
+                # Обновляем кэш треков
+                # self.active_tracks[track_id] = {
+                #     'last_position': center_2d,
+                #     'last_frame': self.processed_count,
+                #     'bbox': boxes[i] if i < len(boxes) else None
+                # }
+
+        # Очищаем трекер
+        self.tracker.cleanup(active_tracks)
+
+        # Определяем, кто покинул кадр
+        # departed = self._find_departed_tracks(active_tracks, frame.shape)
+
+        departed = []
+
+        # Добавляем детекции в 3D сцену
+        cars_3d = self.scene.add_detections(
+            detections,
+            self.processed_count,
+            timestamp
+        )
+
+        # --- Добавляем визуализацию и callback ---
+        if self.frame_callback:
+            # Рисуем аннотации YOLO (маски, bbox, треки)
+            annotated_frame = results[0].plot()  # BGR numpy array
+            # Можно дополнительно нарисовать центры, направления, но это опционально
+            self.frame_callback(self.camera_id, annotated_frame, timestamp, self.processed_count)
+
+        return cars_3d, departed, new_tracks_info
+
+    def _process_frame_segmentation(self, frame, timestamp):
+        """Обрабатывает один кадр"""
+        # Детекция YOLO
+
+        results = self.model.track(
+            frame,
+            conf=0.35,
+            iou=0.5,
+            tracker=self.tracker_config_path,
+            persist=True,
+            verbose=False,
         )
 
         # Извлекаем детекции
@@ -228,17 +339,17 @@ class CameraProcessor:
                 direction = self.tracker.update(track_id, center_2d)
 
                 # Если трек новый, запоминаем для реидентификации
-                if track_id not in self.active_tracks:
-                    # TODO: извлечь признаки для реидентификации
-                    features = self._extract_features(frame, segment_scaled)
-                    new_tracks_info.append((track_id, features))
+                # if track_id not in self.active_tracks:
+                #     # TODO: извлечь признаки для реидентификации
+                #     features = self._extract_features(frame, segment_scaled)
+                #     new_tracks_info.append((track_id, features))
 
                 # Обновляем кэш треков
-                self.active_tracks[track_id] = {
-                    'last_position': center_2d,
-                    'last_frame': self.processed_count,
-                    'bbox': boxes[i] if i < len(boxes) else None
-                }
+                # self.active_tracks[track_id] = {
+                #     'last_position': center_2d,
+                #     'last_frame': self.processed_count,
+                #     'bbox': boxes[i] if i < len(boxes) else None
+                # }
 
                 # Создаем детекцию
                 detections.append(CarDetection(
@@ -251,7 +362,9 @@ class CameraProcessor:
         self.tracker.cleanup(active_tracks)
 
         # Определяем, кто покинул кадр
-        departed = self._find_departed_tracks(active_tracks, frame.shape)
+        # departed = self._find_departed_tracks(active_tracks, frame.shape)
+
+        departed = []
 
         # Добавляем детекции в 3D сцену
         cars_3d = self.scene.add_detections(
@@ -259,6 +372,13 @@ class CameraProcessor:
             self.processed_count,
             timestamp
         )
+
+        # --- Добавляем визуализацию и callback ---
+        if self.frame_callback:
+            # Рисуем аннотации YOLO (маски, bbox, треки)
+            annotated_frame = results[0].plot()  # BGR numpy array
+            # Можно дополнительно нарисовать центры, направления, но это опционально
+            self.frame_callback(self.camera_id, annotated_frame, timestamp, self.processed_count)
 
         return cars_3d, departed, new_tracks_info
 

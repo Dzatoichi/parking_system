@@ -8,6 +8,10 @@ export const emulatorApi = axios.create({
   baseURL: "/emulator",
   headers: { "Content-Type": "application/json" },
 });
+export const cvApiClient = axios.create({
+  baseURL: "/cv",
+  headers: { "Content-Type": "application/json" },
+});
 
 pmApi.interceptors.response.use(
   (r) => r,
@@ -70,6 +74,19 @@ export type CameraNetworkRead = {
   parking_id: number;
   cameras: CameraRead[];
   total: number;
+};
+
+export type CVMonitoringStatus = {
+  mode: "idle" | "markup" | "monitoring";
+  running: boolean;
+  monitor: {
+    cameras: number;
+    active_processors: number;
+    active_vehicles: number;
+    parked_vehicles: number;
+    total_vehicles: number;
+    stats: Record<string, number>;
+  } | null;
 };
 
 export type CameraCreate = {
@@ -273,4 +290,12 @@ export const DeviceApi = {
       `/v1/parking/${params.parkignId}/devices/lighting`,
       params.body
     ),
+};
+
+export const cvMonitoringApi = {
+  getStatus: () => cvApiClient.get<CVMonitoringStatus>("/v1/monitoring/status"),
+  start: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/start"),
+  stop: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/stop"),
+  beginMarkup: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/markup/begin"),
+  finishMarkup: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/markup/finish"),
 };

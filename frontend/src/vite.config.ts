@@ -70,6 +70,12 @@
           secure: false,
           rewrite: (path) => path.replace(/^\/emulator/, ""),
         },
+        "/cv": {
+          target: process.env.VITE_CV_PROXY_TARGET || "http://localhost:8001",
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/cv/, ""),
+        },
       },
     },
   });

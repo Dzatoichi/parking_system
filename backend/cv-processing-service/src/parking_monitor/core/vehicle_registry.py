@@ -1,5 +1,3 @@
-# core/vehicle_registry.py
-
 import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -190,30 +188,54 @@ class VehicleRegistry:
             print(f"VehicleRegistry: registered new vehicle {global_id} on camera {entry_camera}")
             return global_id
 
-    def update_vehicle(self,
-                       track_id: int,
-                       camera_id: int,
-                       position: np.ndarray,
-                       container_id: int,
-                       timestamp: float,
-                       frame: int,
+    def update_vehicle(self, track_id: int, camera_id: int,
+                       position: Optional[np.ndarray], container_id: int,
+                       timestamp: float, frame: int,
                        direction: Optional[np.ndarray] = None) -> bool:
-        """
-        Обновляет позицию существующего автомобиля.
-        Возвращает True, если обновление успешно.
-        """
         with self.lock:
             if track_id not in self.vehicles:
                 return False
 
             vehicle = self.vehicles[track_id]
 
+            # Добавляем позицию только если она не None
+            if position is not None:
+                pos = VehiclePosition(
+                    camera_id=camera_id,
+                    point_3d=position.copy(),
+                    container_id=container_id,
+                    timestamp=timestamp,
+                    frame=frame
+                )
+                vehicle.positions.append(pos)
+                if len(vehicle.positions) > 1000:
+                    vehicle.positions = vehicle.positions[-1000:]
+
+                vehicle.current_position = position.copy()
+                vehicle.current_container = container_id
+                vehicle.last_seen = timestamp
+                vehicle.last_update_frame = frame
+
+                # История камер
+                if not vehicle.camera_history or vehicle.camera_history[-1] != camera_id:
+                    vehicle.camera_history.append(camera_id)
+
+                # Посещённые контейнеры
+                if container_id != -1:
+                    vehicle.visited_containers.add(container_id)
+
+            # Обновляем текущую камеру всегда
+            vehicle.current_camera = camera_id
+
+            if direction is not None:
+                vehicle.set_direction(direction)
+
             # Проверяем, не сменился ли статус
             was_parked = (vehicle.status == VehicleStatus.PARKED)
             is_parked_now = (container_id != -1)
 
-            # Добавляем позицию
-            vehicle.add_position(camera_id, position, container_id, timestamp, frame)
+            # # Добавляем позицию
+            # vehicle.add_position(camera_id, position, container_id, timestamp, frame)
 
             if direction is not None:
                 vehicle.set_direction(direction)

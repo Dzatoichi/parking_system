@@ -3,15 +3,17 @@
 import threading
 import queue
 import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+from typing import Dict, Any
+
+import numpy as np
+
+from parking_monitor.db.repository import ParkingRepository
+from parking_monitor.db.models import ParkingContainer, ParkingSpotState, SpotStatus
 
 from parking_monitor.core.camera_processor import CameraProcessor, ProcessorMessage
+from parking_monitor.core.parking_manager import ParkingSpotManager
 from parking_monitor.core.scene3d import Scene3D
 from parking_monitor.core.vehicle_registry import VehicleRegistry
-from parking_monitor.core.camera_network import CameraNetwork
-from parking_monitor.db.repository import ParkingRepository
-from parking_monitor.db.models import ParkingContainer
 
 
 class ParkingMonitor:
@@ -22,10 +24,13 @@ class ParkingMonitor:
 
     def __init__(self, db_repo: ParkingRepository):
         self.db = db_repo
+        self.spot_manager = None
+        self.initialization_mode = True
+        self.init_end_time = None
 
         # Компоненты
         self.vehicle_registry = VehicleRegistry()
-        self.camera_network = CameraNetwork()
+        # self.camera_network = CameraNetwork()
 
         # Данные о камерах
         self.cameras = {}  # camera_id -> camera_info из БД
@@ -49,6 +54,18 @@ class ParkingMonitor:
             'parked_vehicles': 0
         }
 
+        self.frame_queues = {}
+
+    def _push_frame(self, camera_id: int, frame: np.ndarray, timestamp: float, frame_num: int):
+        """Callback для передачи кадра из процессора в очередь"""
+        q = self.frame_queues.get(camera_id)
+        if q is not None:
+            # Не блокируем, если очередь переполнена – просто пропускаем старые кадры
+            try:
+                q.put_nowait((frame, timestamp, frame_num))
+            except queue.Full:
+                pass
+
     def initialize_from_db(self):
         """
         Загружает все данные из БД и создает процессоры для камер.
@@ -65,11 +82,19 @@ class ParkingMonitor:
         print(f"  Found {len(db_cameras)} cameras")
 
         # 3. Загружаем сеть камер (связи)
-        self.camera_network.load_from_db(self.db)
+        # self.camera_network.load_from_db(self.db)
+
+        self.spot_manager = ParkingSpotManager(self.db, confirmation_seconds=1.0, fps_estimate=10)
+
 
         # 4. Для каждой камеры создаем Scene3D из сохраненных контейнеров
+
         for db_camera in db_cameras:
             print(f"  Initializing camera {db_camera.id}: {db_camera.name}")
+
+            if not db_camera.is_active:
+                print(f"  Camera {db_camera.id}: {db_camera.name} is inactive, skipping")
+                continue
 
             # Создаем сцену
             scene = Scene3D(db_camera.id)
@@ -104,27 +129,40 @@ class ParkingMonitor:
                 if container.is_base:
                     scene.base_container_id = container.id
 
+                if container.id not in self.spot_manager.spots:
+                    self.spot_manager.spots[container.id] = ParkingSpotState(spot_id=container.id,
+                                                                             status=SpotStatus.FREE)
+
+            self.db.initialize_all_spots()
+
             # Сохраняем сцену
             self.scenes[db_camera.id] = scene
 
             # Создаем очередь для команд этому процессору
             self.processor_queues[db_camera.id] = queue.Queue()
 
+            self.frame_queues[db_camera.id] = queue.Queue(maxsize=10)
+
             # Создаем процессор (но пока не запускаем)
             processor = CameraProcessor(
                 camera_id=db_camera.id,
                 video_path=db_camera.video_path,
                 scene_3d=scene,
-                outgoing_queue=self.incoming_queue
+                outgoing_queue=self.incoming_queue,
+                frame_callback=self._push_frame
             )
 
             self.processors[db_camera.id] = processor
             self.cameras[db_camera.id] = db_camera
 
+
         print("Initialization complete")
 
     def start(self):
         """Запускает монитор и все процессоры"""
+        self.initialization_mode = True
+        self.init_end_time = time.time() + 3.0  # 30 секунд
+
         if self.is_running:
             return
 
@@ -168,6 +206,7 @@ class ParkingMonitor:
                 continue
             except Exception as e:
                 print(f"Error in message loop: {e}")
+                # traceback.print_exc()
 
     def _handle_message(self, msg: ProcessorMessage):
         """
@@ -185,82 +224,114 @@ class ParkingMonitor:
                 position=car.center,
                 container_id=car.container_id,
                 direction=car.direction,
-                timestamp=msg.timestamp
+                timestamp=msg.timestamp,
+                frame=msg.frame_number
             )
 
-            # Если автомобиль только что припарковался
+            # Обновляем состояние места
             if car.container_id != -1:
-                self._handle_vehicle_parked(car.track_id, car.container_id)
+                self.spot_manager.update_from_detection(
+                    car.container_id, car.track_id, msg.timestamp
+                )
+            self._update_absent_spots(set(car.container_id for car in msg.cars_3d), msg.timestamp)
+
+            # Если инициализационный режим и время вышло – завершить инициализацию
+            if self.initialization_mode and time.time() > self.init_end_time:
+                self._finalize_initialization()
 
         # 2. Обрабатываем новые треки (нужна реидентификация)
-        for track_id, features in msg.new_tracks:
-            self._handle_new_track(track_id, features, msg.camera_id, msg.timestamp)
+        # for track_id, features in msg.new_tracks:
+        #     self._handle_new_track(track_id, features, msg.camera_id, msg.timestamp, msg.frame_number)
 
         # 3. Обрабатываем уехавшие автомобили
-        for track_id, segment in msg.departed:
-            self._handle_vehicle_departed(track_id, msg.camera_id, segment, msg.timestamp)
+        # for track_id, segment in msg.departed:
+        #     self._handle_vehicle_departed(track_id, msg.camera_id, segment, msg.timestamp)
 
         # Обновляем статистику для отладки
         self.stats['active_vehicles'] = len(self.vehicle_registry.active_vehicles)
         self.stats['parked_vehicles'] = len(self.vehicle_registry.parked_vehicles)
 
-    def _handle_new_track(self, track_id, features, camera_id, timestamp):
-        """
-        Появился новый трек - пытаемся реидентифицировать или регистрируем новый.
-        """
-        # Пытаемся найти соответствие среди известных автомобилей
-        matched_id = self.vehicle_registry.reidentify(features, camera_id)
+    def _finalize_initialization(self):
+        """Финализирует инициализацию: подтверждает/освобождает места согласно накопленным данным"""
+        self.initialization_mode = False
+        # Для каждого места, которое было занято по БД, но не набрало порог – освободить
+        for spot_id, state in self.spot_manager.spots.items():
+            if state.status == SpotStatus.PARKING_PENDING:
+                # Не набрал достаточно кадров – освобождаем в БД и сбрасываем
+                if state.vehicle_track_id is not None:
+                    self.db.mark_spot_free(spot_id)
+                state.status = SpotStatus.FREE
+                state.vehicle_track_id = None
+            elif state.status == SpotStatus.PARKING_CONFIRMED:
+                # Уже подтверждён – ничего не делаем (уже записано в БД)
+                pass
+        print("Initialization completed, parking spots verified")
 
-        if matched_id:
-            # Нашли соответствие - обновляем
-            print(f"Reidentified vehicle {matched_id} on camera {camera_id}")
-            self.vehicle_registry.update_vehicle(
-                track_id=matched_id,
-                camera_id=camera_id,
-                position=None,  # позиция будет в следующем сообщении
-                container_id=-1,
-                timestamp=timestamp
-            )
-            # TODO: отправить подтверждение в процессор
-        else:
-            # Новый автомобиль - регистрируем
-            new_id = self.vehicle_registry.register_new_vehicle(
-                track_id=track_id,
-                features=features,
-                entry_camera=camera_id,
-                entry_time=timestamp
-            )
-            print(f"New vehicle registered: {new_id} on camera {camera_id}")
+    def _update_absent_spots(self, occupied_set: set, timestamp: float):
+        """Для всех мест, которые не были заняты в этом кадре, вызываем update_from_absence"""
+        with self.spot_manager.lock:
+            for spot_id, state in self.spot_manager.spots.items():
+                if spot_id not in occupied_set and state.status != SpotStatus.FREE:
+                    self.spot_manager.update_from_absence(spot_id, timestamp)
 
-    def _handle_vehicle_departed(self, track_id, source_camera_id, segment, timestamp):
-        """
-        Автомобиль покинул камеру - отправляем задание на следующую.
-        """
-        vehicle = self.vehicle_registry.get_vehicle(track_id)
-        if not vehicle:
-            print(f"WARNING: Departed vehicle {track_id} not in registry")
-            return
-
-        # Находим следующую камеру через сеть
-        next_cameras = self.camera_network.get_next_cameras(source_camera_id, segment)
-
-        if not next_cameras:
-            print(f"Vehicle {track_id} left camera {source_camera_id} via {segment} but no next camera defined")
-            # Возможно, автомобиль покинул парковку
-            self._handle_vehicle_exited(track_id, source_camera_id, timestamp)
-            return
-
-        print(f"Vehicle {track_id} left camera {source_camera_id} via {segment} -> next: {next_cameras}")
-
-        # Для каждой возможной следующей камеры отправляем задание
-        for target_camera_id, target_segment in next_cameras:
-            if target_camera_id in self.processor_queues:
-                self.processor_queues[target_camera_id].put({
-                    'type': 'SEARCH_VEHICLE',
-                    'track_id': track_id,
-                    'features': vehicle.features,
-                    'expected_segment': target_segment
-                })
+    # def _handle_new_track(self, track_id, features, camera_id, timestamp, frame):
+    #     """
+    #     Появился новый трек - пытаемся реидентифицировать или регистрируем новый.
+    #     """
+    #     # Пытаемся найти соответствие среди известных автомобилей
+    #     matched_id = self.vehicle_registry.reidentify(features, camera_id)
+    #
+    #     if matched_id:
+    #         # Нашли соответствие - обновляем
+    #         print(f"Reidentified vehicle {matched_id} on camera {camera_id}")
+    #         self.vehicle_registry.update_vehicle(
+    #             track_id=matched_id,
+    #             camera_id=camera_id,
+    #             position=None,  # позиция будет в следующем сообщении
+    #             container_id=-1,
+    #             timestamp=timestamp,
+    #             frame=frame
+    #         )
+    #         # TODO: отправить подтверждение в процессор
+    #     else:
+    #         # Новый автомобиль - регистрируем
+    #         new_id = self.vehicle_registry.register_new_vehicle(
+    #             track_id=track_id,
+    #             features=features,
+    #             entry_camera=camera_id,
+    #             entry_time=timestamp
+    #         )
+    #         print(f"New vehicle registered: {new_id} on camera {camera_id}")
+    #
+    # def _handle_vehicle_departed(self, track_id, source_camera_id, segment, timestamp):
+    #     """
+    #     Автомобиль покинул камеру - отправляем задание на следующую.
+    #     """
+    #     vehicle = self.vehicle_registry.get_vehicle(track_id)
+    #     if not vehicle:
+    #         print(f"WARNING: Departed vehicle {track_id} not in registry")
+    #         return
+    #
+    #     # Находим следующую камеру через сеть
+    #     next_cameras = self.camera_network.get_next_cameras(source_camera_id, segment)
+    #
+    #     if not next_cameras:
+    #         print(f"Vehicle {track_id} left camera {source_camera_id} via {segment} but no next camera defined")
+    #         # Возможно, автомобиль покинул парковку
+    #         self._handle_vehicle_exited(track_id, source_camera_id, timestamp)
+    #         return
+    #
+    #     print(f"Vehicle {track_id} left camera {source_camera_id} via {segment} -> next: {next_cameras}")
+    #
+    #     # Для каждой возможной следующей камеры отправляем задание
+    #     for target_camera_id, target_segment in next_cameras:
+    #         if target_camera_id in self.processor_queues:
+    #             self.processor_queues[target_camera_id].put({
+    #                 'type': 'SEARCH_VEHICLE',
+    #                 'track_id': track_id,
+    #                 'features': vehicle.features,
+    #                 'expected_segment': target_segment
+    #             })
 
     def _handle_vehicle_parked(self, track_id, container_id):
         """
@@ -271,32 +342,32 @@ class ParkingMonitor:
             return
 
         # Если уже был припаркован на другом месте, освобождаем то
-        if vehicle.status == 'PARKED' and vehicle.last_container != container_id:
-            self.db.mark_spot_free(vehicle.last_container)
+        # if vehicle.status == 'PARKED' and vehicle.last_container != container_id:
+        #     self.db.mark_spot_free(vehicle.last_container)
 
         # Отмечаем новое место как занятое
         self.db.mark_spot_occupied(container_id, track_id)
 
         # Обновляем статус в реестре (уже должно быть сделано в update_vehicle)
 
-    def _handle_vehicle_exited(self, track_id, last_camera_id, timestamp):
-        """
-        Автомобиль покинул парковку.
-        """
-        vehicle = self.vehicle_registry.get_vehicle(track_id)
-        if not vehicle:
-            return
-
-        print(f"Vehicle {track_id} exited parking from camera {last_camera_id}")
-
-        # Если был припаркован, освобождаем место
-        if vehicle.status == 'PARKED' and vehicle.last_container:
-            self.db.mark_spot_free(vehicle.last_container)
-
-        # Отмечаем время выезда
-        self.vehicle_registry.mark_exited(track_id, timestamp)
-
-        # TODO: записать в историю БД
+    # def _handle_vehicle_exited(self, track_id, last_camera_id, timestamp):
+    #     """
+    #     Автомобиль покинул парковку.
+    #     """
+    #     vehicle = self.vehicle_registry.get_vehicle(track_id)
+    #     if not vehicle:
+    #         return
+    #
+    #     print(f"Vehicle {track_id} exited parking from camera {last_camera_id}")
+    #
+    #     # Если был припаркован, освобождаем место
+    #     if vehicle.status == 'PARKED' and vehicle.last_container:
+    #         self.db.mark_spot_free(vehicle.last_container)
+    #
+    #     # Отмечаем время выезда
+    #     self.vehicle_registry.mark_exited(track_id, timestamp, last_camera_id)
+    #
+    #     # TODO: записать в историю БД
 
     def get_status(self) -> Dict[str, Any]:
         """Возвращает текущий статус системы"""
