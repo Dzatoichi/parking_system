@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+import asyncio
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from src.api.utils.dependencies import MonitoringServiceDep
 
@@ -8,6 +10,11 @@ monitoring_router = APIRouter(prefix="/v1/monitoring", tags=["monitoring"])
 @monitoring_router.get("/status")
 async def get_monitoring_status(service: MonitoringServiceDep) -> dict:
     return service.status()
+
+
+@monitoring_router.get("/scenes")
+async def get_monitoring_scenes(service: MonitoringServiceDep) -> dict:
+    return service.get_scenes_snapshot()
 
 
 @monitoring_router.post("/start")
@@ -28,3 +35,14 @@ async def begin_markup(service: MonitoringServiceDep) -> dict:
 @monitoring_router.post("/markup/finish")
 async def finish_markup(service: MonitoringServiceDep) -> dict:
     return service.finish_markup()
+
+
+@monitoring_router.websocket("/scenes/ws")
+async def monitoring_scenes_ws(websocket: WebSocket, service: MonitoringServiceDep) -> None:
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json(service.get_scenes_snapshot())
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        return

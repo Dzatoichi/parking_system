@@ -320,16 +320,19 @@ class BookingService:
             "end_time": booking.end_time.isoformat(),
             **(extra_payload or {}),
         }
-        await self._event_dao.create(
-            {
-                "event_type": event_type,
-                "entity_type": "booking",
-                "entity_id": booking.id,
-                "parking_id": parking_id,
-                "message": message,
-                "payload": payload,
-            }
-        )
+        try:
+            await self._event_dao.create(
+                {
+                    "event_type": event_type,
+                    "entity_type": "booking",
+                    "entity_id": booking.id,
+                    "parking_id": parking_id,
+                    "message": message,
+                    "payload": payload,
+                }
+            )
+        except Exception:
+            return
 
     @staticmethod
     def _projection_to_read(projection) -> BookingRead:

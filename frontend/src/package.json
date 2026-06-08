@@ -54,6 +54,10 @@
         "@vitejs/plugin-react-swc": "^3.10.2",
         "vite": "6.3.5"
     },
+    "optionalDependencies": {
+        "@rollup/rollup-win32-x64-msvc": "^4.61.1",
+        "@swc/core-win32-x64-msvc": "^1.15.40"
+    },
     "scripts": {
         "dev": "vite",
         "build": "vite build"

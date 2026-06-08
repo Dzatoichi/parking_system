@@ -1,6 +1,7 @@
+import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
@@ -35,6 +36,31 @@ async def get_spots_map(
         size=size
     )
     return result.items
+
+
+@spot_router.websocket("/{parking_id}/map/ws")
+async def get_spots_map_ws(
+    websocket: WebSocket,
+    parking_id: int,
+    service: SpotServiceDep,
+) -> None:
+    await websocket.accept()
+    try:
+        while True:
+            result = await service.get_spots_by_parking(
+                parking_id=parking_id,
+                page=1,
+                size=200,
+            )
+            await websocket.send_json({
+                "type": "spots_map",
+                "parking_id": parking_id,
+                "data": [spot.model_dump(mode="json") for spot in result.items],
+            })
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        return
+
 
 @spot_router.get(
     "/{parking_id}",

@@ -17,6 +17,8 @@ export type ParkingSpot = {
   parking_id: number;
   hourly_rate?: number;
   for_disabled?: boolean;
+  availability_start_time?: string | null;
+  availability_end_time?: string | null;
   status: number;
 };
 
@@ -63,4 +65,5 @@ export type AuthSession = {
   userId: number;
   userName: string;
   role: UserRole;
+  expiresAt: number;
 };

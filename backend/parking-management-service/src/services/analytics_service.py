@@ -22,6 +22,16 @@ from src.schemas import (
 )
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _format_event_time(value: datetime) -> str:
+    return _as_utc(value).astimezone().strftime("%H:%M")
+
+
 class AnalyticsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -72,10 +82,14 @@ class AnalyticsService:
         ).all()
 
         entries_today = sum(
-            1 for row in tracking_rows if row.event_type == "enter" and row.timestamp >= start_today
+            1
+            for row in tracking_rows
+            if row.event_type == "enter" and _as_utc(row.timestamp) >= start_today
         )
         exits_today = sum(
-            1 for row in tracking_rows if row.event_type == "exit" and row.timestamp >= start_today
+            1
+            for row in tracking_rows
+            if row.event_type == "exit" and _as_utc(row.timestamp) >= start_today
         )
 
         current_vehicles = int(
@@ -90,8 +104,9 @@ class AnalyticsService:
 
         hourly_counter: dict[int, int] = defaultdict(int)
         for row in tracking_rows:
-            if row.timestamp >= start_today and row.event_type in {"enter", "park"}:
-                hourly_counter[row.timestamp.hour] += 1
+            row_ts = _as_utc(row.timestamp)
+            if row_ts >= start_today and row.event_type in {"enter", "park"}:
+                hourly_counter[row_ts.hour] += 1
         hourly_traffic = [
             HourlyTrafficPoint(hour=f"{hour:02d}:00", vehicles=hourly_counter.get(hour, 0))
             for hour in range(24)
@@ -102,8 +117,9 @@ class AnalyticsService:
         weekday_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
         week_daily_vehicles: dict[int, set[int]] = {i: set() for i in range(7)}
         for row in tracking_rows:
-            if row.event_type in {"enter", "park"} and row.timestamp >= start_week:
-                week_daily_vehicles[row.timestamp.weekday()].add(row.vehicle_id)
+            row_ts = _as_utc(row.timestamp)
+            if row.event_type in {"enter", "park"} and row_ts >= start_week:
+                week_daily_vehicles[row_ts.weekday()].add(row.vehicle_id)
         weekly_occupancy = [
             WeeklyOccupancyPoint(
                 day=weekday_names[d],
@@ -123,11 +139,12 @@ class AnalyticsService:
         durations_minutes: list[float] = []
         for _, rows in events_by_vehicle.items():
             enter_ts = None
-            for row in sorted(rows, key=lambda r: r.timestamp):
+            for row in sorted(rows, key=lambda r: _as_utc(r.timestamp)):
+                row_ts = _as_utc(row.timestamp)
                 if row.event_type == "enter":
-                    enter_ts = row.timestamp
+                    enter_ts = row_ts
                 elif row.event_type == "exit" and enter_ts is not None:
-                    duration = (row.timestamp - enter_ts).total_seconds() / 60
+                    duration = (row_ts - enter_ts).total_seconds() / 60
                     if duration > 0:
                         durations_minutes.append(duration)
                     enter_ts = None
@@ -178,7 +195,7 @@ class AnalyticsService:
             RecentEvent(
                 type=row.event_type,
                 plate=row.plate_number,
-                time=row.timestamp.astimezone().strftime("%H:%M"),
+                time=_format_event_time(row.timestamp),
                 action=action_map.get(row.event_type, row.event_type),
             )
             for row in tracking_rows[:7]
@@ -187,7 +204,7 @@ class AnalyticsService:
             RecentEvent(
                 type=event.event_type,
                 plate=f"Booking #{event.entity_id}",
-                time=event.created_at.astimezone().strftime("%H:%M"),
+                time=_format_event_time(event.created_at),
                 action=event.message,
             )
             for event in system_event_rows
@@ -197,11 +214,11 @@ class AnalyticsService:
             for _, event in sorted(
                 [
                     *(
-                        (row.timestamp, event)
+                        (_as_utc(row.timestamp), event)
                         for row, event in zip(tracking_rows[:7], tracking_recent_events)
                     ),
                     *(
-                        (row.created_at, event)
+                        (_as_utc(row.created_at), event)
                         for row, event in zip(system_event_rows, system_recent_events)
                     ),
                 ],

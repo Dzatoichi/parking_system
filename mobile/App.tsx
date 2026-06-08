@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   ActivityIndicator,
   Alert,
@@ -8,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,9 +32,23 @@ import {
   login,
   register,
   updateOwnerSpot
-} from "./src/api";
+} from "./src/application/mobileServices";
+import {
+  BookingTimeSlot,
+  calculateBookingCost,
+  createDefaultBookingTimeSlot,
+  formatBookingDateTime,
+  formatBookingDuration,
+  formatDateInput,
+  setBookingClock,
+  setBookingDate,
+  shiftBookingDay,
+  shiftBookingTime,
+  validateBookingTimeSlot
+} from "./src/domain/booking/bookingTime";
+import { clearStoredSession, loadStoredSession, saveStoredSession, sessionTtlMs } from "./src/application/mobileServices";
 import { colors, spacing } from "./src/theme";
-import { AuthSession, Booking, Parking, ParkingSpot, Payment, UserRole, Vehicle } from "./src/types";
+import { AuthSession, Booking, Parking, ParkingSpot, Payment, Vehicle } from "./src/types";
 
 type TabKey = "parkings" | "booking" | "vehicle" | "owner" | "profile";
 
@@ -54,12 +68,37 @@ export default function App() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedParking, setSelectedParking] = useState<Parking | null>(null);
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
+  const [bookingTimeSlot, setBookingTimeSlot] = useState<BookingTimeSlot>(() => createDefaultBookingTimeSlot());
   const [activeBooking, setActiveBooking] = useState<Booking | null>(null);
   const [activePayment, setActivePayment] = useState<Payment | null>(null);
+  const [sessionRestoring, setSessionRestoring] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   const token = session?.accessToken;
+
+  useEffect(() => {
+    let mounted = true;
+    loadStoredSession()
+      .then((storedSession) => {
+        if (mounted) {
+          setSession(storedSession);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setSession(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setSessionRestoring(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!session) {
@@ -68,6 +107,33 @@ export default function App() {
 
     void loadInitialData();
   }, [session]);
+
+  useEffect(() => {
+    if (!session || !selectedParking) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      getSpots(selectedParking.id, token)
+        .then((freshSpots) => setSpots(freshSpots))
+        .catch((error) => {
+          if (isUnauthorizedError(error)) {
+            handleError(error, "РќСѓР¶РЅРѕ РІРѕР№С‚Рё Р·Р°РЅРѕРІРѕ");
+          }
+        });
+    }, 15_000);
+
+    return () => clearInterval(intervalId);
+  }, [session, selectedParking, token]);
+
+  async function applySession(nextSession: AuthSession | null) {
+    setSession(nextSession);
+    if (nextSession) {
+      await saveStoredSession(nextSession);
+    } else {
+      await clearStoredSession();
+    }
+  }
 
   async function loadInitialData() {
     setLoading(true);
@@ -109,7 +175,7 @@ export default function App() {
   }
 
   async function bookSelectedSpot() {
-    if (!selectedParking || !selectedSpot) {
+    if (!session || !selectedParking || !selectedSpot) {
       Alert.alert("Выберите место", "Сначала выберите парковку и свободное парковочное место.");
       return;
     }
@@ -117,10 +183,24 @@ export default function App() {
     setLoading(true);
     setErrorBanner(null);
     try {
+      const bookingTimeError = validateBookingTimeSlot(bookingTimeSlot);
+      if (bookingTimeError) {
+        Alert.alert("Проверьте время", bookingTimeError);
+        return;
+      }
+
+      const hourlyRate = selectedSpot.hourly_rate ?? 100;
+      const totalCost = calculateBookingCost(hourlyRate, bookingTimeSlot);
+
       const booking = await createBooking({
+        userId: session.userId,
         parkingId: selectedParking.id,
         spotId: selectedSpot.id,
         vehicleId: vehicles[0]?.id,
+        startTime: bookingTimeSlot.startTime,
+        endTime: bookingTimeSlot.endTime,
+        hourlyRate,
+        totalCost,
         token
       });
       setActiveBooking(booking);
@@ -213,7 +293,7 @@ export default function App() {
   function handleError(error: unknown, title: string) {
     const message = getErrorMessage(error);
     if (isUnauthorizedError(error)) {
-      setSession(null);
+      void applySession(null);
       setErrorBanner(null);
       Alert.alert("Нужно войти заново", message);
       return;
@@ -222,11 +302,26 @@ export default function App() {
     Alert.alert(title, message);
   }
 
+  if (sessionRestoring) {
+  return (
+    <SafeAreaProvider style={{ flex: 1 }}>
+      <View style={styles.emptyState}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    </SafeAreaProvider>
+  );
+}
+
   if (!session) {
-    return <AuthScreen onSession={setSession} />;
-  }
+  return (
+    <SafeAreaProvider style={{ flex: 1 }}>
+      <AuthScreen onSession={(nextSession) => void applySession(nextSession)} />
+    </SafeAreaProvider>
+  );
+}
 
   return (
+    <SafeAreaProvider>
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <View style={styles.header}>
@@ -253,8 +348,10 @@ export default function App() {
             selectedParking={selectedParking}
             spots={spots}
             selectedSpot={selectedSpot}
+            bookingTimeSlot={bookingTimeSlot}
             onSelectParking={selectParking}
             onSelectSpot={setSelectedSpot}
+            onBookingTimeSlotChange={setBookingTimeSlot}
             onBook={bookSelectedSpot}
           />
         ) : null}
@@ -269,9 +366,9 @@ export default function App() {
         ) : null}
         {activeTab === "vehicle" ? <VehicleScreen vehicles={vehicles} onAddVehicle={addCar} /> : null}
         {activeTab === "owner" ? (
-          <OwnerScreen role={session.role} spots={spots} onToggleSpot={toggleOwnerSpot} />
+          <OwnerScreen spots={spots} onToggleSpot={toggleOwnerSpot} />
         ) : null}
-        {activeTab === "profile" ? <ProfileScreen session={session} onLogout={() => setSession(null)} /> : null}
+        {activeTab === "profile" ? <ProfileScreen session={session} onLogout={() => void applySession(null)} /> : null}
       </View>
 
       <View style={styles.tabBar}>
@@ -289,6 +386,7 @@ export default function App() {
         ))}
       </View>
     </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
@@ -296,21 +394,21 @@ function AuthScreen({ onSession }: { onSession: (session: AuthSession) => void }
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("tenant@example.com");
   const [password, setPassword] = useState("password123");
-  const [role, setRole] = useState<UserRole>("tenant");
   const [loading, setLoading] = useState(false);
 
   async function submit() {
     setLoading(true);
     try {
       const response =
-        mode === "login" ? await login(email, password) : await register(email, password, role);
-      const responseRole = String(response.user.role ?? role).toLowerCase();
+        mode === "login" ? await login(email, password) : await register(email, password);
+      const responseRole = String(response.user.role ?? "tenant").toLowerCase();
       onSession({
         accessToken: response.tokens.access_token,
         refreshToken: response.tokens.refresh_token,
         userId: response.user.id ?? 1,
         userName: response.user.full_name || email,
-        role: responseRole.includes("landlord") ? "landlord" : role
+        role: responseRole.includes("landlord") ? "landlord" : "tenant",
+        expiresAt: Date.now() + sessionTtlMs
       });
     } catch (error) {
       Alert.alert("Ошибка входа", getErrorMessage(error));
@@ -320,7 +418,7 @@ function AuthScreen({ onSession }: { onSession: (session: AuthSession) => void }
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.authWrap}>
         <Text style={styles.authTitle}>Smart Parking</Text>
@@ -351,20 +449,10 @@ function AuthScreen({ onSession }: { onSession: (session: AuthSession) => void }
             style={styles.input}
             value={password}
           />
-          {mode === "register" ? (
-            <View style={styles.segment}>
-              <Pressable style={[styles.segmentButton, role === "tenant" && styles.segmentActive]} onPress={() => setRole("tenant")}>
-                <Text style={[styles.segmentText, role === "tenant" && styles.segmentTextActive]}>Арендатор</Text>
-              </Pressable>
-              <Pressable style={[styles.segmentButton, role === "landlord" && styles.segmentActive]} onPress={() => setRole("landlord")}>
-                <Text style={[styles.segmentText, role === "landlord" && styles.segmentTextActive]}>Владелец</Text>
-              </Pressable>
-            </View>
-          ) : null}
           <PrimaryButton label={mode === "login" ? "Войти" : "Создать аккаунт"} icon="log-in-outline" onPress={submit} disabled={loading} />
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -373,16 +461,20 @@ function ParkingScreen({
   selectedParking,
   spots,
   selectedSpot,
+  bookingTimeSlot,
   onSelectParking,
   onSelectSpot,
+  onBookingTimeSlotChange,
   onBook
 }: {
   parkings: Parking[];
   selectedParking: Parking | null;
   spots: ParkingSpot[];
   selectedSpot: ParkingSpot | null;
+  bookingTimeSlot: BookingTimeSlot;
   onSelectParking: (parking: Parking) => void;
   onSelectSpot: (spot: ParkingSpot) => void;
+  onBookingTimeSlotChange: (slot: BookingTimeSlot) => void;
   onBook: () => void;
 }) {
   const freeCount = spots.filter((spot) => spot.status === 1).length;
@@ -444,6 +536,98 @@ function ParkingScreen({
           );
         })}
       </View>
+
+      <View style={styles.timePanel}>
+        <View>
+          <Text style={styles.panelKicker}>Время бронирования</Text>
+          <Text style={styles.cardTitle}>{formatBookingDateTime(bookingTimeSlot.startTime)}</Text>
+          <Text style={styles.mutedText}>до {formatBookingDateTime(bookingTimeSlot.endTime)}</Text>
+        </View>
+        <View style={styles.dateQuickRow}>
+          <SecondaryButton label="Сегодня" icon="today-outline" onPress={() => onBookingTimeSlotChange(setBookingDate(bookingTimeSlot, formatDateInput(new Date())))} />
+          <SecondaryButton label="+1 день" icon="chevron-forward-outline" onPress={() => onBookingTimeSlotChange(shiftBookingDay(bookingTimeSlot, 1))} />
+        </View>
+        <View style={styles.dateInputRow}>
+          <Text style={styles.fieldLabel}>Дата</Text>
+          <TextInput
+            keyboardType="numbers-and-punctuation"
+            onChangeText={(date) => onBookingTimeSlotChange(setBookingDate(bookingTimeSlot, date))}
+            placeholder="YYYY-MM-DD"
+            style={[styles.input, styles.compactInput, styles.dateInput]}
+            value={formatDateInput(bookingTimeSlot.startTime)}
+          />
+        </View>
+        <View style={styles.clockGrid}>
+          <View style={styles.clockGroup}>
+            <Text style={styles.fieldLabel}>Начало</Text>
+            <View style={styles.clockInputs}>
+              <TextInput
+                keyboardType="number-pad"
+                maxLength={2}
+                onChangeText={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", hour, padClock(bookingTimeSlot.startTime.getMinutes())))}
+                style={[styles.input, styles.compactInput, styles.clockInput]}
+                value={padClock(bookingTimeSlot.startTime.getHours())}
+              />
+              <Text style={styles.clockSeparator}>:</Text>
+              <TextInput
+                keyboardType="number-pad"
+                maxLength={2}
+                onChangeText={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", padClock(bookingTimeSlot.startTime.getHours()), minute))}
+                style={[styles.input, styles.compactInput, styles.clockInput]}
+                value={padClock(bookingTimeSlot.startTime.getMinutes())}
+              />
+            </View>
+          </View>
+          <View style={styles.clockGroup}>
+            <Text style={styles.fieldLabel}>Окончание</Text>
+            <View style={styles.clockInputs}>
+              <TextInput
+                keyboardType="number-pad"
+                maxLength={2}
+                onChangeText={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", hour, padClock(bookingTimeSlot.endTime.getMinutes())))}
+                style={[styles.input, styles.compactInput, styles.clockInput]}
+                value={padClock(bookingTimeSlot.endTime.getHours())}
+              />
+              <Text style={styles.clockSeparator}>:</Text>
+              <TextInput
+                keyboardType="number-pad"
+                maxLength={2}
+                onChangeText={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", padClock(bookingTimeSlot.endTime.getHours()), minute))}
+                style={[styles.input, styles.compactInput, styles.clockInput]}
+                value={padClock(bookingTimeSlot.endTime.getMinutes())}
+              />
+            </View>
+          </View>
+        </View>
+        <View style={styles.timeStepper}>
+          <SecondaryButton label="-15 мин старт" icon="remove-outline" onPress={() => onBookingTimeSlotChange(shiftBookingTime(bookingTimeSlot, "start", -15))} />
+          <SecondaryButton label="+15 мин конец" icon="add-outline" onPress={() => onBookingTimeSlotChange(shiftBookingTime(bookingTimeSlot, "end", 15))} />
+        </View>
+        <View style={styles.bookingEstimate}>
+          <Text style={styles.mutedText}>Длительность: {formatBookingDuration(bookingTimeSlot)}</Text>
+        </View>
+      </View>
+
+      {selectedSpot ? (
+        <View style={styles.spotInfoPanel}>
+          <View style={styles.detailRowCompact}>
+            <Text style={styles.detailLabel}>ID места</Text>
+            <Text style={styles.detailValue}>{selectedSpot.id}</Text>
+          </View>
+          <View style={styles.detailRowCompact}>
+            <Text style={styles.detailLabel}>Статус</Text>
+            <Text style={styles.detailValue}>{selectedSpot.status === 1 ? "Доступно" : "Недоступно"}</Text>
+          </View>
+          <View style={styles.detailRowCompact}>
+            <Text style={styles.detailLabel}>Период доступности</Text>
+            <Text style={styles.detailValue}>{formatAvailability(selectedSpot)}</Text>
+          </View>
+          <View style={styles.detailRowCompact}>
+            <Text style={styles.detailLabel}>Стоимость</Text>
+            <Text style={styles.detailValue}>{calculateBookingCost(selectedSpot.hourly_rate ?? 100, bookingTimeSlot)} ₽</Text>
+          </View>
+        </View>
+      ) : null}
 
       <PrimaryButton label="Забронировать выбранное место" icon="calendar-outline" onPress={onBook} disabled={!selectedSpot} />
     </ScrollView>
@@ -578,11 +762,9 @@ function VehicleScreen({ vehicles, onAddVehicle }: { vehicles: Vehicle[]; onAddV
 }
 
 function OwnerScreen({
-  role,
   spots,
   onToggleSpot
 }: {
-  role: UserRole;
   spots: ParkingSpot[];
   onToggleSpot: (spot: ParkingSpot) => void;
 }) {
@@ -590,12 +772,11 @@ function OwnerScreen({
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
-      {role !== "landlord" ? (
-        <View style={styles.notice}>
-          <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
-          <Text style={styles.noticeText}>Экран показывает базовый сценарий арендодателя из НТО. Для полной модели прав нужна backend-роль landlord.</Text>
-        </View>
-      ) : null}
+      <Text style={styles.sectionTitle}>Выставить свое место</Text>
+      <View style={styles.notice}>
+        <Ionicons name="key-outline" size={22} color={colors.primary} />
+        <Text style={styles.noticeText}>Откройте место, которое находится в вашей собственности, чтобы оно стало доступно для бронирования. Закрытое место не показывается как доступное.</Text>
+      </View>
 
       <View style={styles.summaryBand}>
         <View>
@@ -703,6 +884,19 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function formatAvailability(spot: ParkingSpot) {
+  if (!spot.availability_start_time && !spot.availability_end_time) {
+    return "Сейчас";
+  }
+  const start = spot.availability_start_time ? formatTime(spot.availability_start_time) : "сейчас";
+  const end = spot.availability_end_time ? formatTime(spot.availability_end_time) : "без ограничения";
+  return `${start} - ${end}`;
+}
+
+function padClock(value: number) {
+  return value.toString().padStart(2, "0");
 }
 
 function getBookingAmount(booking: Booking) {
@@ -868,6 +1062,16 @@ const styles = StyleSheet.create({
     minHeight: 50,
     paddingHorizontal: spacing.md
   },
+  compactInput: {
+    minHeight: 42,
+    paddingHorizontal: spacing.sm
+  },
+  fieldLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginBottom: spacing.xs
+  },
   sectionTitle: {
     color: colors.text,
     fontSize: 18,
@@ -968,6 +1172,90 @@ const styles = StyleSheet.create({
   spotTextMuted: {
     color: colors.muted
   },
+  timePanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginTop: spacing.md,
+    padding: spacing.lg
+  },
+  dateQuickRow: {
+    flexDirection: "row",
+    gap: spacing.sm
+  },
+  dateInputRow: {
+    gap: spacing.xs
+  },
+  dateInput: {
+    width: "100%"
+  },
+  clockGrid: {
+    flexDirection: "row",
+    gap: spacing.md
+  },
+  clockGroup: {
+    flex: 1
+  },
+  clockInputs: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs
+  },
+  clockInput: {
+    flex: 1,
+    minWidth: 54,
+    textAlign: "center"
+  },
+  clockSeparator: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800"
+  },
+  timeStepper: {
+    flexDirection: "row",
+    gap: spacing.sm
+  },
+  bookingEstimate: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    paddingTop: spacing.sm
+  },
+  durationRow: {
+    flexDirection: "row",
+    gap: spacing.sm
+  },
+  durationButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: 6,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 42,
+    justifyContent: "center"
+  },
+  durationButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
+  durationText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  durationTextActive: {
+    color: "#FFFFFF"
+  },
+  spotInfoPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: spacing.md,
+    padding: spacing.lg
+  },
   detailPanel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -1020,6 +1308,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: spacing.md,
     paddingTop: spacing.md
+  },
+  detailRowCompact: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: spacing.sm
   },
   detailLabel: {
     color: colors.muted,

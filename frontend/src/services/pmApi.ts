@@ -89,6 +89,46 @@ export type CVMonitoringStatus = {
   } | null;
 };
 
+export type Point3D = [number, number, number];
+export type Point2D = [number, number];
+
+export type ParkingSceneContainer = {
+  id: number;
+  camera_id: number;
+  spot_id?: number | null;
+  name: string;
+  length: number;
+  width: number;
+  height: number;
+  ground_points: Point3D[];
+  upper_points: Point3D[];
+  image_points?: Point2D[] | null;
+  is_base?: boolean;
+  polygon: Point2D[];
+  occupied?: boolean;
+  parked_since?: string | null;
+};
+
+export type ParkingSceneVehicle = {
+  track_id: number;
+  center: Point3D;
+  direction?: Point3D | null;
+  container_id?: number;
+};
+
+export type ParkingScene = {
+  camera_id: number;
+  bbox: [number, number, number, number];
+  containers: ParkingSceneContainer[];
+  spots: ParkingSceneContainer[];
+  vehicles: ParkingSceneVehicle[];
+};
+
+export type ParkingScenesResponse = {
+  type: "all_scenes";
+  data: Record<string, ParkingScene>;
+};
+
 export type CameraCreate = {
   rtsp_url: string;
   position_x?: number | null;
@@ -294,6 +334,7 @@ export const DeviceApi = {
 
 export const cvMonitoringApi = {
   getStatus: () => cvApiClient.get<CVMonitoringStatus>("/v1/monitoring/status"),
+  getScenes: () => cvApiClient.get<ParkingScenesResponse>("/v1/monitoring/scenes"),
   start: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/start"),
   stop: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/stop"),
   beginMarkup: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/markup/begin"),

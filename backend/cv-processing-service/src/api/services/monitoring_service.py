@@ -177,6 +177,77 @@ class MonitoringService:
             "monitor": monitor_status,
         }
 
+    def get_scenes_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            monitor = self._monitor
+            if monitor is None:
+                repo = self._get_repo()
+                cameras = repo.get_all_cameras()
+                scenes = {}
+                for camera in cameras:
+                    if not camera.is_active:
+                        continue
+                    containers = [container.to_dict() for container in repo.get_camera_containers(camera.id)]
+                    scenes[str(camera.id)] = self._serialize_scene(camera.id, containers)
+                return {"type": "all_scenes", "data": scenes}
+
+            scenes = {}
+            for camera_id, scene in monitor.scenes.items():
+                containers = []
+                for container in scene.containers.values():
+                    item = container.to_dict()
+                    state = monitor.spot_manager.spots.get(container.id) if monitor.spot_manager else None
+                    status_value = getattr(getattr(state, "status", None), "value", None)
+                    item["occupied"] = status_value in {"parking_pending", "parking_confirmed"}
+                    parked_since = getattr(state, "confirmed_time", None)
+                    item["parked_since"] = parked_since.isoformat() if parked_since else None
+                    containers.append(item)
+                scene_data = self._serialize_scene(camera_id, containers)
+                scene_data["vehicles"] = [
+                    {
+                        "track_id": car.track_id,
+                        "center": self._array_to_list(car.center),
+                        "direction": self._array_to_list(car.direction) if car.direction is not None else None,
+                        "container_id": car.container_id,
+                    }
+                    for car in scene.get_current_cars()
+                ]
+                scenes[str(camera_id)] = scene_data
+            return {"type": "all_scenes", "data": scenes}
+
+    @staticmethod
+    def _serialize_scene(camera_id: int, containers: list[dict[str, Any]]) -> dict[str, Any]:
+        serialized = []
+        all_points: list[list[float]] = []
+        for container in containers:
+            ground_points = container.get("ground_points") or []
+            polygon = [[float(point[0]), float(point[2])] for point in ground_points]
+            all_points.extend(polygon)
+            serialized.append({
+                **container,
+                "camera_id": camera_id,
+                "polygon": polygon,
+            })
+
+        if all_points:
+            xs = [point[0] for point in all_points]
+            zs = [point[1] for point in all_points]
+            bbox = [min(xs), min(zs), max(xs), max(zs)]
+        else:
+            bbox = [0, 0, 10, 10]
+
+        return {
+            "camera_id": camera_id,
+            "bbox": bbox,
+            "containers": serialized,
+            "spots": serialized,
+            "vehicles": [],
+        }
+
+    @staticmethod
+    def _array_to_list(value: Any) -> list[float]:
+        return [float(item) for item in value]
+
     def _get_repo(self) -> Any:
         if self._pool is None:
             try:

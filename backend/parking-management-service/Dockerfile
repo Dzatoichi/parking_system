@@ -14,7 +14,8 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
 COPY pyproject.toml poetry.lock* ./
 RUN pip install --no-cache-dir poetry watchfiles && \
     poetry config virtualenvs.create false && \
-    poetry install --only main --no-root
+    poetry install --only main --no-root && \
+    pip install --no-cache-dir websockets
 
 COPY . .
 

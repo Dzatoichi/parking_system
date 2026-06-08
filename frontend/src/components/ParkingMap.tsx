@@ -9,6 +9,7 @@ import {
 } from "../services/pmApi";
 import { getApiErrorMessage } from "../lib/api";
 import { useParkingMapData } from "../hooks/useParkingMapData";
+import { ParkingSceneWidget } from "./ParkingSceneWidget";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -191,6 +192,8 @@ export function ParkingMap() {
 
       {loading && <p className="text-sm text-gray-500">Загрузка данных...</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <ParkingSceneWidget />
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5">
         <div className="space-y-4">
