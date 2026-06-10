@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getApiErrorMessage } from "../lib/api";
+import { parkingWsUrl } from "../lib/ws";
 import { parkingApi, spotApi, type ParkingRead, type SpotRead } from "../services/pmApi";
 
 const NO_ACTIVE_PARKING_MESSAGE = "Нет активных парковок. Добавьте данные в БД.";
 const SERGEY_TEST_PARKING_NAME = "Парковка Сергея 5005";
+const WS_CONNECT_DELAY_MS = 100;
 
 export function useParkingMapData(selectedParkingId?: number | null) {
   const [wsSpots, setWsSpots] = useState<SpotRead[] | null>(null);
-  const [wsError, setWsError] = useState<string | null>(null);
   const lastWsMessageRef = useRef<string>("");
+  const connectTimerRef = useRef<number | null>(null);
 
   const parkingsQuery = useQuery({
     queryKey: ["parkingMapParkings"],
@@ -39,34 +41,45 @@ export function useParkingMapData(selectedParkingId?: number | null) {
 
   useEffect(() => {
     setWsSpots(null);
-    setWsError(null);
 
-    if (parkingId == null) return;
+    if (parkingId == null) return undefined;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/spots/${parkingId}/map/ws`);
+    let closedByEffect = false;
+    let ws: WebSocket | null = null;
 
-    ws.onmessage = (event) => {
-      try {
-        if (event.data === lastWsMessageRef.current) return;
-        lastWsMessageRef.current = event.data;
+    const connect = () => {
+      ws = new WebSocket(parkingWsUrl(`/spots/${parkingId}/map/ws`));
 
-        const payload = JSON.parse(event.data) as { type?: string; data?: SpotRead[] };
-        if (payload.type === "spots_map" && Array.isArray(payload.data)) {
-          setWsSpots(payload.data);
-          setWsError(null);
+      ws.onmessage = (event) => {
+        try {
+          if (event.data === lastWsMessageRef.current) return;
+          lastWsMessageRef.current = event.data;
+
+          const payload = JSON.parse(event.data) as { type?: string; data?: SpotRead[] };
+          if (payload.type === "spots_map" && Array.isArray(payload.data)) {
+            setWsSpots(payload.data);
+          }
+        } catch {
+          return;
         }
-      } catch {
-        setWsError("Ошибка потока схемы парковки");
-      }
+      };
+
+      ws.onerror = () => undefined;
+      ws.onclose = () => {
+        if (closedByEffect) return;
+      };
     };
 
-    ws.onerror = () => {
-      setWsError("WebSocket схемы парковки недоступен");
-    };
+    connectTimerRef.current = window.setTimeout(connect, WS_CONNECT_DELAY_MS);
 
     return () => {
-      ws.close();
+      closedByEffect = true;
+      if (connectTimerRef.current != null) {
+        window.clearTimeout(connectTimerRef.current);
+      }
+      if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
     };
   }, [parkingId]);
 
@@ -76,7 +89,7 @@ export function useParkingMapData(selectedParkingId?: number | null) {
     error:
       parkingsQuery.isSuccess && parking === null
         ? NO_ACTIVE_PARKING_MESSAGE
-        : wsError || getApiErrorMessage(spotsQuery.error ?? parkingsQuery.error, "Ошибка загрузки данных"),
+        : getApiErrorMessage(spotsQuery.error ?? parkingsQuery.error, "Ошибка загрузки данных"),
     loading:
       parkingsQuery.isLoading ||
       parkingsQuery.isFetching ||

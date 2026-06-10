@@ -32,6 +32,10 @@ class MobileBookingCreate(BaseModel):
     parking_spot: int | None = Field(default=None, gt=0)
     parking_spot_id: int | None = Field(default=None, gt=0)
     car_id: int | None = Field(default=None)
+    vehicle_id: int | None = Field(default=None)
+    plate_number: str | None = Field(default=None)
+    number_plate: str | None = Field(default=None)
+    car_number_plate: str | None = Field(default=None)
     hourly_rate: float | None = Field(default=None)
     total_cost: float | None = Field(default=None)
     penalty: float | None = Field(default=None)
@@ -127,7 +131,7 @@ async def _booking_to_mobile(
         "parking_id": spot.parking_id,
         "owner_id": None,
         "user_id": booking.user_id,
-        "car_id": car_id or 0,
+        "car_id": car_id or booking.vehicle_id or 0,
         "parking_spot": booking.spot_id,
         "parking_spot_id": booking.spot_id,
         "spot_name": spot.spot_number,
@@ -139,8 +143,8 @@ async def _booking_to_mobile(
         "expired_at": booking.end_time.isoformat(),
         "parking_name": None,
         "parking_address": None,
-        "car_number_plate": None,
-        "car_name": None,
+        "car_number_plate": booking.vehicle_plate_number,
+        "car_name": booking.vehicle_plate_number,
         "detail": None,
     }
 
@@ -221,6 +225,7 @@ async def create_mobile_booking(
     body: MobileBookingCreate,
     booking_service: BookingServiceDep,
     spot_service: SpotServiceDep,
+    vehicle_service: VehicleServiceDep,
     user_id: int = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     spot_id = body.parking_spot_id or body.parking_spot
@@ -229,9 +234,18 @@ async def create_mobile_booking(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="parking_spot or parking_spot_id is required",
         )
+    vehicle_id = body.vehicle_id or body.car_id
+    if vehicle_id == 0:
+        vehicle_id = None
+    plate_number = body.plate_number or body.number_plate or body.car_number_plate
+    if vehicle_id is None and plate_number:
+        vehicle = await vehicle_service.get_vehicle_by_plate(plate_number)
+        vehicle_id = vehicle.id
+
     booking = await booking_service.create_booking(
         BookingCreate(
             user_id=body.user_id or user_id,
+            vehicle_id=vehicle_id,
             spot_id=spot_id,
             start_time=body.start_time,
             end_time=body.end_time,

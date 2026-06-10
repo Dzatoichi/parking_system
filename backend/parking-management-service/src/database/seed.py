@@ -13,12 +13,79 @@ from src.models.tracking import Tracking
 from src.models.vehicles import Vehicles
 
 
+SERGEY_TEST_PARKING_NAME = "Парковка Сергея 5005"
+
+SERGEY_TEST_SPOTS = [
+    (
+        "SG-5005-1",
+        {"points": [[120, 120], [420, 120], [420, 280], [120, 280]], "center_x": 270, "center_y": 200},
+    ),
+    (
+        "SG-5005-2",
+        {"points": [[120, 300], [420, 300], [420, 460], [120, 460]], "center_x": 270, "center_y": 380},
+    ),
+    (
+        "SG-5005-3",
+        {"points": [[120, 480], [420, 480], [420, 640], [120, 640]], "center_x": 270, "center_y": 560},
+    ),
+]
+
+
+async def _ensure_sergey_test_data(session) -> None:
+    parking = await session.scalar(
+        select(ParkingBase).where(ParkingBase.name == SERGEY_TEST_PARKING_NAME)
+    )
+    if parking is None:
+        parking = ParkingBase(
+            name=SERGEY_TEST_PARKING_NAME,
+            address="Тестовые данные Сергея",
+            total_spots=3,
+            available_spots=3,
+            coordinates={"lat": 0, "lng": 0},
+            boundaries={"points": [[0, 0], [500, 0], [500, 265], [0, 265]]},
+            is_active=True,
+            settings={"source": "sergey_dump"},
+        )
+        session.add(parking)
+        await session.flush()
+
+    for spot_number, coordinates in SERGEY_TEST_SPOTS:
+        spot = await session.scalar(
+            select(Spot).where(
+                Spot.parking_id == parking.id,
+                Spot.spot_number == spot_number,
+            )
+        )
+        if spot is None:
+            session.add(
+                Spot(
+                    spot_number=spot_number,
+                    spot_type=SpotType.STANDARD,
+                    spot_status=SpotStatus.FREE,
+                    spot_coordinates=coordinates,
+                    occupied_since=None,
+                    current_vehicle_id=None,
+                    parking_id=parking.id,
+                )
+            )
+        else:
+            spot.spot_status = SpotStatus.FREE
+            spot.spot_coordinates = coordinates
+            spot.occupied_since = None
+            spot.current_vehicle_id = None
+
+    parking.total_spots = 3
+    parking.available_spots = 3
+
+
 async def seed_demo_data() -> None:
     demo_owner_id = 1
 
     async with db_helper.async_session_maker() as session:
         existing_count = await session.scalar(select(func.count(ParkingBase.id)))
         if existing_count and existing_count > 0:
+            await _ensure_sergey_test_data(session)
+            await session.commit()
             return
 
         parking = ParkingBase(
@@ -212,4 +279,5 @@ async def seed_demo_data() -> None:
 
         session.add_all(tracking_events)
         parking.available_spots = len([s for s in spots if s.spot_status == SpotStatus.FREE])
+        await _ensure_sergey_test_data(session)
         await session.commit()

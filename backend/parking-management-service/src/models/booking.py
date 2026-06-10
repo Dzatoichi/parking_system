@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Integer, ForeignKey, DateTime, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -58,4 +59,8 @@ class Booking(Base):
         "Spot",
         back_populates="bookings",
         foreign_keys=[spot_id],
+    )
+    vehicle: Mapped[Optional["Vehicles"]] = relationship(
+        "Vehicles",
+        foreign_keys=[vehicle_id],
     )

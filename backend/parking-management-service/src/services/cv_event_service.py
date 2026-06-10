@@ -12,6 +12,7 @@ from src.models.status.spot_status import SpotStatus
 from src.models.system_events import SystemEvent
 from src.models.tracking import Tracking
 from src.models.vehicles import Vehicles
+from src.services.system_event_ws import system_event_ws_manager
 
 
 class CVEventService:
@@ -29,6 +30,7 @@ class CVEventService:
         await self._record_observation(payload)
 
     async def _handle_spot_occupied(self, payload: dict[str, Any]) -> None:
+        system_events: list[SystemEvent] = []
         async with db_helper.async_session_maker() as session:
             async with session.begin():
                 spot = await self._get_spot_for_update(session, payload["spot_id"])
@@ -55,24 +57,28 @@ class CVEventService:
                         bbox=payload.get("bbox"),
                     )
                 )
-                session.add(
-                    self._system_event(
-                        payload,
-                        event_type="spot_status_changed",
-                        entity_type="spot",
-                        entity_id=spot.id,
-                        message="spot occupied",
-                        extra={
-                            "previous_status": previous_status.value,
-                            "new_status": SpotStatus.OCCUPIED.value,
-                            "vehicle_id": vehicle.id,
-                        },
-                    )
+                status_event = self._system_event(
+                    payload,
+                    event_type="spot_status_changed",
+                    entity_type="spot",
+                    entity_id=spot.id,
+                    message="spot occupied",
+                    extra={
+                        "previous_status": previous_status.value,
+                        "new_status": SpotStatus.OCCUPIED.value,
+                        "vehicle_id": vehicle.id,
+                    },
                 )
-                await self._record_booking_mismatch(session, spot, vehicle, payload)
+                session.add(status_event)
+                system_events.append(status_event)
+                system_events.extend(await self._record_booking_mismatch(session, spot, vehicle, payload))
                 await self._sync_available_spots(session, spot.parking_id)
+                await session.flush()
+        for event in system_events:
+            await system_event_ws_manager.broadcast_event(event)
 
     async def _handle_spot_free(self, payload: dict[str, Any]) -> None:
+        system_events: list[SystemEvent] = []
         async with db_helper.async_session_maker() as session:
             async with session.begin():
                 spot = await self._get_spot_for_update(session, payload["spot_id"])
@@ -98,21 +104,24 @@ class CVEventService:
                         )
                     )
 
-                session.add(
-                    self._system_event(
-                        payload,
-                        event_type="spot_status_changed",
-                        entity_type="spot",
-                        entity_id=spot.id,
-                        message="spot free",
-                        extra={
-                            "previous_status": previous_status.value,
-                            "new_status": new_status.value,
-                            "previous_vehicle_id": previous_vehicle_id,
-                        },
-                    )
+                status_event = self._system_event(
+                    payload,
+                    event_type="spot_status_changed",
+                    entity_type="spot",
+                    entity_id=spot.id,
+                    message="spot free",
+                    extra={
+                        "previous_status": previous_status.value,
+                        "new_status": new_status.value,
+                        "previous_vehicle_id": previous_vehicle_id,
+                    },
                 )
+                session.add(status_event)
+                system_events.append(status_event)
                 await self._sync_available_spots(session, spot.parking_id)
+                await session.flush()
+        for event in system_events:
+            await system_event_ws_manager.broadcast_event(event)
 
     async def _record_observation(self, payload: dict[str, Any]) -> None:
         async with db_helper.async_session_maker() as session:
@@ -144,35 +153,37 @@ class CVEventService:
         await session.flush()
         return vehicle
 
-    async def _record_booking_mismatch(self, session, spot: Spot, vehicle: Vehicles, payload: dict[str, Any]) -> None:
+    async def _record_booking_mismatch(self, session, spot: Spot, vehicle: Vehicles, payload: dict[str, Any]) -> list[SystemEvent]:
+        system_events: list[SystemEvent] = []
         active_bookings = await self._active_bookings(session, spot.id, self._parse_timestamp(payload))
         for booking in active_bookings:
             if booking.vehicle_id is not None and booking.vehicle_id != vehicle.id:
-                session.add(
-                    self._system_event(
-                        payload,
-                        event_type="booking_conflict",
-                        entity_type="booking",
-                        entity_id=booking.id,
-                        message="booking mismatch",
-                        extra={
-                            "booking_vehicle_id": booking.vehicle_id,
-                            "actual_vehicle_id": vehicle.id,
-                            "spot_id": spot.id,
-                        },
-                    )
+                event = self._system_event(
+                    payload,
+                    event_type="booking_conflict",
+                    entity_type="booking",
+                    entity_id=booking.id,
+                    message="booking mismatch",
+                    extra={
+                        "booking_vehicle_id": booking.vehicle_id,
+                        "actual_vehicle_id": vehicle.id,
+                        "spot_id": spot.id,
+                    },
                 )
+                session.add(event)
+                system_events.append(event)
             elif booking.vehicle_id is None:
-                session.add(
-                    self._system_event(
-                        payload,
-                        event_type="booking_conflict",
-                        entity_type="booking",
-                        entity_id=booking.id,
-                        message="unknown vehicle",
-                        extra={"actual_vehicle_id": vehicle.id, "spot_id": spot.id},
-                    )
+                event = self._system_event(
+                    payload,
+                    event_type="booking_conflict",
+                    entity_type="booking",
+                    entity_id=booking.id,
+                    message="unknown vehicle",
+                    extra={"actual_vehicle_id": vehicle.id, "spot_id": spot.id},
                 )
+                session.add(event)
+                system_events.append(event)
+        return system_events
 
     async def _active_bookings(self, session, spot_id: int, now: datetime) -> list[Booking]:
         result = await session.execute(

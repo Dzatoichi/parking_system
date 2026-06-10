@@ -1,6 +1,7 @@
-from datetime import datetime
+import asyncio
+from datetime import date, datetime, time
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from src.schemas.booking_schemas import (
     AvailableSpotInfo,
@@ -10,6 +11,7 @@ from src.schemas.booking_schemas import (
     BookingUpdate,
 )
 from src.models.status.booking_status import BookingStatus
+from src.services.booking_ws import booking_ws_manager
 from src.utils.dependencies import BookingServiceDep
 
 booking_router = APIRouter(prefix="/bookings", tags=["bookings"])
@@ -54,6 +56,23 @@ async def create_booking(
 ) -> BookingRead:
     return await service.create_booking(body)
 
+
+@booking_router.websocket("/ws")
+async def bookings_ws(websocket: WebSocket) -> None:
+    await booking_ws_manager.connect(websocket)
+    try:
+        await websocket.send_json({"type": "bookings_connected"})
+        while True:
+            await asyncio.sleep(30)
+            await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        return
+    finally:
+        booking_ws_manager.disconnect(websocket)
+
+
 @booking_router.get(
     "",
     response_model=BookingListResponse,
@@ -64,8 +83,15 @@ async def get_bookings(
         booking_service: BookingServiceDep,
         parking_id: int | None = Query(default=None),
         status: BookingStatus | None = Query(default=None),
+        vehicle_plate: str | None = Query(default=None),
         from_: datetime | None = Query(default=None, alias="from"),
         to: datetime | None = Query(default=None),
+        start_date: date | None = Query(default=None),
+        end_date: date | None = Query(default=None),
+        start_from: datetime | None = Query(default=None),
+        start_to: datetime | None = Query(default=None),
+        end_from: datetime | None = Query(default=None),
+        end_to: datetime | None = Query(default=None),
         page: int = Query(default=1, ge=1),
         size: int = Query(default=50, ge=1, le=200),
 ) -> BookingListResponse:
@@ -77,8 +103,11 @@ async def get_bookings(
         size=size,
         parking_id=parking_id,
         status_filter=status,
-        start_from=from_,
-        end_to=to,
+        vehicle_plate=vehicle_plate.strip() if vehicle_plate else None,
+        start_from=start_from or (datetime.combine(start_date, time.min) if start_date else from_),
+        start_to=start_to or (datetime.combine(start_date, time.max) if start_date else None),
+        end_from=end_from or (datetime.combine(end_date, time.min) if end_date else None),
+        end_to=end_to or (datetime.combine(end_date, time.max) if end_date else to),
     )
 
 

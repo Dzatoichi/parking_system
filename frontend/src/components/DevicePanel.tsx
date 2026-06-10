@@ -67,7 +67,34 @@ export function DevicePanel() {
         result.success
       );
       // Обновить состояние после команды
-      await fetchState();
+      if (result.success) {
+        setState((prev) => {
+          const current = prev ?? {
+            parking_id: result.parking_id,
+            barrier: { position: "closed" as const },
+            lighting: { on: false, brightness: 0 },
+          };
+
+          if (result.device_kind === "barrier") {
+            const position = result.state.position === "open" ? "open" : "closed";
+            return { ...current, barrier: { position } };
+          }
+
+          if (result.device_kind === "lighting") {
+            return {
+              ...current,
+              lighting: {
+                on: Boolean(result.state.on),
+                brightness: Number(result.state.brightness ?? 0),
+              },
+            };
+          }
+
+          return current;
+        });
+      } else {
+        await fetchState();
+      }
     } catch {
       addLog(`${label}: не удалось выполнить команду`, false);
       if (simulateUnreachable) {
@@ -99,14 +126,14 @@ export function DevicePanel() {
             Парковка #{parkingId}
           </p>
         </div>
-        <Button
+        {/* <Button
           variant="outline"
           onClick={fetchState}
           disabled={loadingState}
           className="text-sm"
         >
           {loadingState ? "Обновление..." : "Обновить"}
-        </Button>
+        </Button> */}
       </div>
 
       <div className="grid grid-cols-3 gap-6">
@@ -194,9 +221,9 @@ export function DevicePanel() {
         </div>
 
         <div className="flex items-center justify-center h-20 mb-4">
-            <div className={`text-6xl transition-all duration-300 ${lightingOn ? "opacity-100" : "opacity-20"}`}>
+            {/* <div className={`text-6xl transition-all duration-300 ${lightingOn ? "opacity-100" : "opacity-20"}`}>
             💡
-            </div>
+            </div> */}
         </div>
 
         <Button

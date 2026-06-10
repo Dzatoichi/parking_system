@@ -18,6 +18,8 @@ from src.schemas.booking_schemas import (
     BookingRead,
     BookingUpdate,
 )
+from src.services.booking_ws import booking_ws_manager
+from src.services.system_event_ws import system_event_ws_manager
 
 
 class BookingService:
@@ -82,14 +84,13 @@ class BookingService:
             message="booking created",
         )
         await self._publish_projection_event(created_booking, spot.parking_id, spot.spot_number)
+        await self._broadcast_booking_change(created_booking, spot.parking_id, spot.spot_number, "created")
         return await self.get_booking(created_booking.id)
 
     async def get_booking(self, booking_id: int) -> BookingRead:
         booking = await self._get_booking_or_404(booking_id)
         projected = await self._projection_dao.get_by_booking_id(booking.id)
-        if projected is not None:
-            return self._projection_to_read(projected)
-        return BookingRead.model_validate(booking)
+        return self._booking_to_read(booking, projected)
 
     async def get_bookings(
         self,
@@ -98,7 +99,10 @@ class BookingService:
         size: int = 50,
         parking_id: int | None = None,
         status_filter: BookingStatus | None = None,
+        vehicle_plate: str | None = None,
         start_from: datetime | None = None,
+        start_to: datetime | None = None,
+        end_from: datetime | None = None,
         end_to: datetime | None = None,
     ) -> BookingListResponse:
         bookings, total = await self._booking_dao.get_paginated(
@@ -106,7 +110,10 @@ class BookingService:
             size=size,
             parking_id=parking_id,
             status_filter=status_filter,
+            vehicle_plate=vehicle_plate,
             start_from=start_from,
+            start_to=start_to,
+            end_from=end_from,
             end_to=end_to,
         )
         projections = await self._projection_dao.get_by_booking_ids([booking.id for booking in bookings])
@@ -226,6 +233,7 @@ class BookingService:
                 previous_status=previous_status,
             )
         await self._publish_projection_event(updated, spot.parking_id, spot.spot_number)
+        await self._broadcast_booking_change(updated, spot.parking_id, spot.spot_number, "updated")
         return await self.get_booking(updated.id)
 
     async def _get_booking_or_404(self, booking_id: int) -> Booking:
@@ -272,6 +280,28 @@ class BookingService:
         except Exception:
             # The booking table is the source of truth; RabbitMQ only refreshes the read projection.
             return
+
+    async def _broadcast_booking_change(
+        self,
+        booking: Booking,
+        parking_id: int,
+        spot_number: str,
+        action: str,
+    ) -> None:
+        await booking_ws_manager.broadcast(
+            {
+                "type": "booking_changed",
+                "action": action,
+                "booking_id": booking.id,
+                "parking_id": parking_id,
+                "spot_id": booking.spot_id,
+                "spot_number": spot_number,
+                "status": booking.status.value,
+                "start_time": booking.start_time.isoformat(),
+                "end_time": booking.end_time.isoformat(),
+                "updated_at": booking.updated_at.isoformat(),
+            }
+        )
 
     async def _create_booking_status_event(
         self,
@@ -321,7 +351,7 @@ class BookingService:
             **(extra_payload or {}),
         }
         try:
-            await self._event_dao.create(
+            event = await self._event_dao.create(
                 {
                     "event_type": event_type,
                     "entity_type": "booking",
@@ -331,6 +361,7 @@ class BookingService:
                     "payload": payload,
                 }
             )
+            await system_event_ws_manager.broadcast_event(event)
         except Exception:
             return
 
@@ -341,6 +372,7 @@ class BookingService:
             user_id=projection.user_id,
             user_name=projection.user_name,
             vehicle_id=getattr(projection, "vehicle_id", None),
+            vehicle_plate_number=None,
             spot_id=projection.spot_id,
             spot_number=projection.spot_number,
             start_time=projection.start_time,
@@ -357,6 +389,7 @@ class BookingService:
             user_id=booking.user_id,
             user_name=getattr(projection, "user_name", None),
             vehicle_id=getattr(booking, "vehicle_id", None),
+            vehicle_plate_number=getattr(getattr(booking, "vehicle", None), "plate_number", None),
             spot_id=booking.spot_id,
             spot_number=getattr(getattr(booking, "spot", None), "spot_number", None),
             start_time=booking.start_time,

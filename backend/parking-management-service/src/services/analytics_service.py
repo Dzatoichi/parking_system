@@ -183,7 +183,6 @@ class AnalyticsService:
                 select(SystemEvent)
                 .where(
                     SystemEvent.parking_id == parking_id,
-                    SystemEvent.entity_type == "booking",
                     SystemEvent.created_at >= start_week,
                 )
                 .order_by(SystemEvent.created_at.desc(), SystemEvent.id.desc())
@@ -203,7 +202,7 @@ class AnalyticsService:
         system_recent_events = [
             RecentEvent(
                 type=event.event_type,
-                plate=f"Booking #{event.entity_id}",
+                plate=f"{event.entity_type} #{event.entity_id}",
                 time=_format_event_time(event.created_at),
                 action=event.message,
             )

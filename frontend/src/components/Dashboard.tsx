@@ -158,7 +158,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
           </div>
         </Card>
 
-        <Card className="p-6 bg-white shadow-sm">
+        {/* <Card className="p-6 bg-white shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Обзор парковки</h3>
             <TrendingUp className="w-5 h-5 text-gray-400" />
@@ -193,7 +193,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (screen: Screen) => voi
               Заполненность {statsData ? `${Math.round(statsData.occupancy_rate * 100)}%` : "-"}
             </span>
           </div>
-        </Card>
+        </Card> */}
       </div>
     </div>
   );

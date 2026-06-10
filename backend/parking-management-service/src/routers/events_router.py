@@ -1,11 +1,29 @@
-from fastapi import APIRouter, Query
+import asyncio
 
-from src.models.system_events import SystemEvent
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+
 from src.schemas import PaginatedResponse
 from src.schemas.events_schemas import SystemEventReadSchema, SystemEventCreateSchema
+from src.services.system_event_ws import system_event_ws_manager
 from src.utils.dependencies import EventServiceDep
 
 events_router = APIRouter(prefix="/events", tags=["events"])
+
+
+@events_router.websocket("/ws")
+async def events_ws(websocket: WebSocket) -> None:
+    await system_event_ws_manager.connect(websocket)
+    try:
+        await websocket.send_json({"type": "events_connected"})
+        while True:
+            await asyncio.sleep(30)
+            await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        return
+    finally:
+        system_event_ws_manager.disconnect(websocket)
 
 @events_router.get(
     path="",

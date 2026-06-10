@@ -76,7 +76,7 @@ class EmulatorService:
         response_payload: dict[str, Any] | None,
         success: bool,
         error_message: str | None,
-    ) -> None:
+    ) -> IntegrationDeviceEvent:
         ev = IntegrationDeviceEvent(
             parking_id=parking_id,
             device_kind=device_kind,
@@ -89,6 +89,40 @@ class EmulatorService:
         )
         self._session.add(ev)
         await self._session.commit()
+        await self._session.refresh(ev)
+        return ev
+
+    async def _publish_device_event(
+        self,
+        event: IntegrationDeviceEvent,
+        *,
+        event_type: str,
+        message: str,
+    ) -> None:
+        if self._event_producer is None:
+            return
+
+        try:
+            await self._event_producer.send_device_event(
+                SystemEventCreateSchema(
+                    event_type=event_type,
+                    entity_type=event.device_kind,
+                    entity_id=event.id,
+                    parking_id=event.parking_id,
+                    message=message,
+                    payload={
+                        "device_event_id": event.id,
+                        "device_kind": event.device_kind,
+                        "action": event.action,
+                        "success": event.success,
+                        "error_message": event.error_message,
+                        "request_payload": event.request_payload,
+                        "response_payload": event.response_payload,
+                    },
+                )
+            )
+        except Exception:
+            return
 
     async def get_state(self, parking_id: int) -> ParkingDevicesStateOut:
         barrier_row = await self._get_device_row(parking_id, KIND_BARRIER)
@@ -104,7 +138,7 @@ class EmulatorService:
     async def open_barrier(self, parking_id: int, *, simulate_unreachable: bool = False) -> CommandResultOut:
         req = {"simulate_unreachable": simulate_unreachable}
         if simulate_unreachable:
-            await self._append_event(
+            event = await self._append_event(
                 parking_id=parking_id,
                 device_kind=KIND_BARRIER,
                 action="barrier_open",
@@ -113,6 +147,7 @@ class EmulatorService:
                 success=False,
                 error_message="Эмулятор: устройство недоступно (тестовый режим)",
             )
+            await self._publish_device_event(event, event_type=EventType.DEVICE_UNAVAILABLE.value, message="device unavailable")
             st = (await self._get_device_row(parking_id, KIND_BARRIER))
             cur = st.state if st else _default_barrier_state()
             return CommandResultOut(
@@ -131,7 +166,7 @@ class EmulatorService:
         # )
         await self._upsert_state(parking_id, KIND_BARRIER, new_state)
         # await self._event_producer
-        await self._append_event(
+        event = await self._append_event(
             parking_id=parking_id,
             device_kind=KIND_BARRIER,
             action="barrier_open",
@@ -140,6 +175,7 @@ class EmulatorService:
             success=True,
             error_message=None,
         )
+        await self._publish_device_event(event, event_type=EventType.BARRIER_OPENED.value, message="barrier opened")
         return CommandResultOut(
             success=True,
             parking_id=parking_id,
@@ -152,7 +188,7 @@ class EmulatorService:
     async def close_barrier(self, parking_id: int, *, simulate_unreachable: bool = False) -> CommandResultOut:
         req = {"simulate_unreachable": simulate_unreachable}
         if simulate_unreachable:
-            await self._append_event(
+            event = await self._append_event(
                 parking_id=parking_id,
                 device_kind=KIND_BARRIER,
                 action="barrier_close",
@@ -161,6 +197,7 @@ class EmulatorService:
                 success=False,
                 error_message="Эмулятор: устройство недоступно (тестовый режим)",
             )
+            await self._publish_device_event(event, event_type=EventType.DEVICE_UNAVAILABLE.value, message="device unavailable")
             st = await self._get_device_row(parking_id, KIND_BARRIER)
             cur = st.state if st else _default_barrier_state()
             return CommandResultOut(
@@ -173,7 +210,7 @@ class EmulatorService:
             )
         new_state = {"position": "closed"}
         await self._upsert_state(parking_id, KIND_BARRIER, new_state)
-        await self._append_event(
+        event = await self._append_event(
             parking_id=parking_id,
             device_kind=KIND_BARRIER,
             action="barrier_close",
@@ -182,6 +219,7 @@ class EmulatorService:
             success=True,
             error_message=None,
         )
+        await self._publish_device_event(event, event_type=EventType.BARRIER_CLOSED.value, message="barrier closed")
         return CommandResultOut(
             success=True,
             parking_id=parking_id,
@@ -194,7 +232,7 @@ class EmulatorService:
     async def set_lighting(self, parking_id: int, body: LightingSetBody) -> CommandResultOut:
         req = body.model_dump()
         if body.simulate_unreachable:
-            await self._append_event(
+            event = await self._append_event(
                 parking_id=parking_id,
                 device_kind=KIND_LIGHTING,
                 action="lighting_set",
@@ -203,6 +241,7 @@ class EmulatorService:
                 success=False,
                 error_message="Эмулятор: устройство недоступно (тестовый режим)",
             )
+            await self._publish_device_event(event, event_type=EventType.DEVICE_UNAVAILABLE.value, message="device unavailable")
             st = await self._get_device_row(parking_id, KIND_LIGHTING)
             cur = st.state if st else _default_lighting_state()
             return CommandResultOut(
@@ -215,7 +254,7 @@ class EmulatorService:
             )
         new_state = {"on": body.on, "brightness": body.brightness if body.on else 0}
         await self._upsert_state(parking_id, KIND_LIGHTING, new_state)
-        await self._append_event(
+        event = await self._append_event(
             parking_id=parking_id,
             device_kind=KIND_LIGHTING,
             action="lighting_set",
@@ -224,6 +263,7 @@ class EmulatorService:
             success=True,
             error_message=None,
         )
+        await self._publish_device_event(event, event_type=EventType.LIGHTING_CHANGED.value, message="lighting changed")
         return CommandResultOut(
             success=True,
             parking_id=parking_id,

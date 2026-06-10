@@ -105,7 +105,7 @@ async def get_spot(
     spot_id: int,
     service: SpotServiceDep,
 ) -> SpotRead:
-    return await service.get_spot(spot_id)
+    return await service.get_spot_by_id(spot_id)
 
 
 @spot_router.post(

@@ -38,6 +38,7 @@ class BookingRead(BaseSchema):
     user_id: int
     user_name: str | None = None
     vehicle_id: int | None = None
+    vehicle_plate_number: str | None = None
     spot_id: int
     spot_number: str | None = None
     start_time: datetime

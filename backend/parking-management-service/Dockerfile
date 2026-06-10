@@ -12,10 +12,10 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml poetry.lock* ./
-RUN pip install --no-cache-dir poetry watchfiles && \
+RUN pip install --no-cache-dir poetry watchfiles "uvicorn[standard]" && \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-root && \
-    pip install --no-cache-dir websockets
+    pip install --no-cache-dir "uvicorn[standard]" websockets wsproto
 
 COPY . .
 

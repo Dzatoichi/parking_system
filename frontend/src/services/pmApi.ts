@@ -124,6 +124,25 @@ export type ParkingScene = {
   vehicles: ParkingSceneVehicle[];
 };
 
+export type MarkupContainerPayload = {
+  id?: number | null;
+  spot_id?: number | null;
+  name: string;
+  length: number;
+  width: number;
+  height: number;
+  ground_points?: Point3D[] | null;
+  upper_points?: Point3D[] | null;
+  image_points?: Point2D[] | null;
+  is_base?: boolean;
+};
+
+export type MarkupSceneResponse = {
+  mode: "markup";
+  camera_id: number;
+  containers: ParkingSceneContainer[];
+};
+
 export type ParkingScenesResponse = {
   type: "all_scenes";
   data: Record<string, ParkingScene>;
@@ -153,6 +172,7 @@ export type BookingRead = {
   spot_number: string | null;
   user_id: number;
   user_name: string | null;
+  vehicle_plate_number: string | null;
   start_time: string;
   end_time: string;
   status: BookingStatus;
@@ -237,7 +257,7 @@ export type CommandResultOut = {
   parking_id: number;
   device_kind: string;
   action: string;
-  state: { position: "open"};
+  state: Record<string, unknown>;
   message: string | null;
 }
 
@@ -300,8 +320,15 @@ export const bookingApi = {
   getAll: (params: {
     parking_id?: number;
     status?: BookingStatus;
+    vehicle_plate?: string;
     from?: string;
     to?: string;
+    start_date?: string;
+    end_date?: string;
+    start_from?: string;
+    start_to?: string;
+    end_from?: string;
+    end_to?: string;
     page?: number;
     size?: number;
   }) => pmApi.get<PaginatedResponse<BookingRead>>("/bookings", { params }),
@@ -339,4 +366,22 @@ export const cvMonitoringApi = {
   stop: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/stop"),
   beginMarkup: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/markup/begin"),
   finishMarkup: () => cvApiClient.post<CVMonitoringStatus>("/v1/monitoring/markup/finish"),
+};
+
+export const cvMarkupApi = {
+  getFrameUrl: (cameraId: number) => `/cv/v1/markup/cameras/${cameraId}/frame`,
+  buildScene: (body: {
+    camera_id: number;
+    image_width: number;
+    image_height: number;
+    containers: MarkupContainerPayload[];
+  }) => cvApiClient.post<MarkupSceneResponse>("/v1/markup/scene", body),
+  save: (body: {
+    camera_id: number;
+    containers: MarkupContainerPayload[];
+    replace_existing?: boolean;
+  }) => cvApiClient.post<{ mode: "idle"; camera_id: number; saved: ParkingSceneContainer[]; count: number }>(
+    "/v1/markup/save",
+    body
+  ),
 };

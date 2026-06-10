@@ -333,6 +333,7 @@ export async function createBooking(input: {
   parkingId: number;
   spotId: number;
   vehicleId?: number;
+  vehiclePlate?: string;
   startTime: Date;
   endTime: Date;
   hourlyRate?: number;
@@ -368,6 +369,9 @@ export async function createBooking(input: {
       spot_id: input.spotId,
       car_id: input.vehicleId,
       vehicle_id: input.vehicleId,
+      plate_number: input.vehiclePlate,
+      number_plate: input.vehiclePlate,
+      car_number_plate: input.vehiclePlate,
       start_time: startTime,
       end_time: endTime,
       hourly_rate: input.hourlyRate ?? 100,

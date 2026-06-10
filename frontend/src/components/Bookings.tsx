@@ -1,63 +1,67 @@
-import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useBookingsData } from '../hooks/useBookingsData';
-import type { BookingStatus } from '../services/pmApi';
+import React, { useState } from "react";
+import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { useBookingsData } from "../hooks/useBookingsData";
+import type { BookingStatus } from "../services/pmApi";
 
 const statusColors: Record<BookingStatus, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  confirmed: 'bg-blue-100 text-blue-800',
-  completed: 'bg-green-100 text-green-800',
-  cancelled: 'bg-gray-100 text-gray-800',
-  expired: 'bg-red-100 text-red-800',
+  pending: "bg-yellow-100 text-yellow-800",
+  confirmed: "bg-blue-100 text-blue-800",
+  completed: "bg-green-100 text-green-800",
+  cancelled: "bg-gray-100 text-gray-800",
+  expired: "bg-red-100 text-red-800",
 };
 
 const statusLabels: Record<BookingStatus, string> = {
-  pending: 'Ожидает',
-  confirmed: 'Подтверждён',
-  completed: 'Завершён',
-  cancelled: 'Отменён',
-  expired: 'Истёк',
+  pending: "Ожидает",
+  confirmed: "Подтвержден",
+  completed: "Завершен",
+  cancelled: "Отменен",
+  expired: "Истек",
 };
 
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString("ru-RU");
+}
+
 export function Bookings() {
-  const [status, setStatus] = useState<BookingStatus | ''>('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [status, setStatus] = useState<BookingStatus | "">("");
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
   const { data, loading, error } = useBookingsData({
     status: status || undefined,
-    from: dateFrom || undefined,
-    to: dateTo || undefined,
+    vehiclePlate: vehiclePlate.trim() || undefined,
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
     page,
     size: pageSize,
   });
 
+  const resetPage = () => setPage(1);
+
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setStatus(e.target.value as BookingStatus | '');
-    setPage(1);
+    setStatus(e.target.value as BookingStatus | "");
+    resetPage();
   };
 
-  const handleDateFromChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDateFrom(e.target.value);
-    setPage(1);
-  };
-
-  const handleDateToChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDateTo(e.target.value);
-    setPage(1);
+  const resetFilters = () => {
+    setStatus("");
+    setVehiclePlate("");
+    setStartDate("");
+    setEndDate("");
+    resetPage();
   };
 
   const handlePreviousPage = () => {
-    if (page > 1) {
-      setPage(page - 1);
-    }
+    setPage((current) => Math.max(current - 1, 1));
   };
 
   const handleNextPage = () => {
     if (data && page < Math.ceil(data.total / pageSize)) {
-      setPage(page + 1);
+      setPage((current) => current + 1);
     }
   };
 
@@ -70,9 +74,8 @@ export function Bookings() {
       </div>
 
       <div className="p-6">
-        {/* Фильтры */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="grid grid-cols-1 md:-grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Статус
@@ -84,40 +87,72 @@ export function Bookings() {
               >
                 <option value="">Все</option>
                 <option value="pending">Ожидает</option>
-                <option value="confirmed">Подтверждён</option>
-                <option value="completed">Завершён</option>
-                <option value="cancelled">Отменён</option>
-                <option value="expired">Истёк</option>
+                <option value="confirmed">Подтвержден</option>
+                <option value="completed">Завершен</option>
+                <option value="cancelled">Отменен</option>
+                <option value="expired">Истек</option>
               </select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Дата с
+                Госномер авто
               </label>
               <input
-                type="datetime-local"
-                value={dateFrom}
-                onChange={handleDateFromChange}
+                type="text"
+                value={vehiclePlate}
+                onChange={(event) => {
+                  setVehiclePlate(event.target.value.toUpperCase());
+                  resetPage();
+                }}
+                placeholder="A123BC77"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Дата по
+                Дата начала
               </label>
               <input
-                type="datetime-local"
-                value={dateTo}
-                onChange={handleDateToChange}
+                type="date"
+                value={startDate}
+                onChange={(event) => {
+                  setStartDate(event.target.value);
+                  resetPage();
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Дата конца
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(event) => {
+                    setEndDate(event.target.value);
+                    resetPage();
+                  }}
+                  className="min-w-0 flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                  title="Сбросить фильтры"
+                  aria-label="Сбросить фильтры"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Таблица */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -133,6 +168,9 @@ export function Bookings() {
                     Пользователь
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Авто
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Начало
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -142,14 +180,14 @@ export function Bookings() {
                     Статус
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Дата создания
+                    Создано
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {loading && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                       Загрузка...
                     </td>
                   </tr>
@@ -157,7 +195,7 @@ export function Bookings() {
 
                 {error && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-red-600">
+                    <td colSpan={8} className="px-6 py-8 text-center text-red-600">
                       Ошибка загрузки данных: {error}
                     </td>
                   </tr>
@@ -165,7 +203,7 @@ export function Bookings() {
 
                 {!loading && !error && data?.items.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                       Нет данных
                     </td>
                   </tr>
@@ -185,10 +223,13 @@ export function Bookings() {
                         {booking.user_name ?? `ID ${booking.user_id}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(booking.start_time).toLocaleString()}
+                        {booking.vehicle_plate_number ?? "-"}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(booking.end_time).toLocaleString()}
+                        {formatDateTime(booking.start_time)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatDateTime(booking.end_time)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
@@ -198,7 +239,7 @@ export function Bookings() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(booking.created_at).toLocaleString()}
+                        {formatDateTime(booking.created_at)}
                       </td>
                     </tr>
                   ))}
@@ -206,7 +247,6 @@ export function Bookings() {
             </table>
           </div>
 
-          {/* Пагинация */}
           {data && data.total > 0 && (
             <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
               <div className="text-sm text-gray-700">
@@ -226,7 +266,7 @@ export function Bookings() {
                   disabled={page >= totalPages}
                   className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Вперёд
+                  Вперед
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </button>
               </div>

@@ -8,6 +8,7 @@ from src.dao.base_dao import BaseDAO
 from src.models.booking import Booking
 from src.models.status.booking_status import BookingStatus
 from src.models.spots import Spot
+from src.models.vehicles import Vehicles
 
 
 class BookingDAO(BaseDAO[Booking]):
@@ -21,6 +22,16 @@ class BookingDAO(BaseDAO[Booking]):
     #     return result.scalar_one_or_none()
 
     @BaseDAO.with_exception
+    async def get_by_id(self, booking_id: int) -> Booking | None:
+        async with self._get_session() as session:
+            result = await session.execute(
+                select(self.model)
+                .options(selectinload(self.model.spot), selectinload(self.model.vehicle))
+                .where(self.model.id == booking_id)
+            )
+            return result.scalar_one_or_none()
+
+    @BaseDAO.with_exception
     async def get_user_bookings(
         self,
         user_id: int,
@@ -29,7 +40,11 @@ class BookingDAO(BaseDAO[Booking]):
         limit: int = 50,
     ) -> tuple[list[Booking], int]:
         async with self._get_session() as session:
-            query = select(self.model).options(selectinload(self.model.spot)).where(self.model.user_id == user_id)
+            query = (
+                select(self.model)
+                .options(selectinload(self.model.spot), selectinload(self.model.vehicle))
+                .where(self.model.user_id == user_id)
+            )
             count_query = select(func.count(self.model.id)).where(self.model.user_id == user_id)
             if status_filter:
                 query = query.where(self.model.status == status_filter)
@@ -96,7 +111,9 @@ class BookingDAO(BaseDAO[Booking]):
     async def get_all_with_spot(self) -> list[Booking]:
         async with self._get_session() as session:
             rows = await session.execute(
-                select(self.model).options(selectinload(self.model.spot)).order_by(self.model.created_at.desc())
+                select(self.model)
+                .options(selectinload(self.model.spot), selectinload(self.model.vehicle))
+                .order_by(self.model.created_at.desc())
             )
             return list(rows.scalars().all())
 
@@ -108,12 +125,15 @@ class BookingDAO(BaseDAO[Booking]):
         *,
         parking_id: int | None = None,
         status_filter: BookingStatus | None = None,
+        vehicle_plate: str | None = None,
         start_from: datetime | None = None,
+        start_to: datetime | None = None,
+        end_from: datetime | None = None,
         end_to: datetime | None = None,
     ) -> tuple[list[Booking], int]:
         offset = (page - 1) * size
 
-        query = select(self.model).options(selectinload(self.model.spot))
+        query = select(self.model).options(selectinload(self.model.spot), selectinload(self.model.vehicle))
         count_query = select(func.count(self.model.id))
 
         if parking_id is not None:
@@ -124,9 +144,26 @@ class BookingDAO(BaseDAO[Booking]):
             query = query.where(self.model.status == status_filter)
             count_query = count_query.where(self.model.status == status_filter)
 
+        if vehicle_plate:
+            plate_filter = f"%{vehicle_plate.strip().lower()}%"
+            query = query.join(Vehicles, Vehicles.id == self.model.vehicle_id).where(
+                func.lower(Vehicles.plate_number).like(plate_filter)
+            )
+            count_query = count_query.join(Vehicles, Vehicles.id == self.model.vehicle_id).where(
+                func.lower(Vehicles.plate_number).like(plate_filter)
+            )
+
         if start_from is not None:
             query = query.where(self.model.start_time >= start_from)
             count_query = count_query.where(self.model.start_time >= start_from)
+
+        if start_to is not None:
+            query = query.where(self.model.start_time <= start_to)
+            count_query = count_query.where(self.model.start_time <= start_to)
+
+        if end_from is not None:
+            query = query.where(self.model.end_time >= end_from)
+            count_query = count_query.where(self.model.end_time >= end_from)
 
         if end_to is not None:
             query = query.where(self.model.end_time <= end_to)

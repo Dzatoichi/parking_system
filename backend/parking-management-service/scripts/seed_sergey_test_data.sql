@@ -63,7 +63,7 @@ camera_upsert AS (
         parking_id
     )
     SELECT
-        '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts',
+        '/app/videos/test.ts',
         'ACTIVE',
         0,
         0,
@@ -75,7 +75,7 @@ camera_upsert AS (
     WHERE NOT EXISTS (
         SELECT 1
         FROM camera_table
-        WHERE rtsp_url = '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts'
+        WHERE rtsp_url = '/app/videos/test.ts'
     )
     RETURNING id, parking_id
 ),
@@ -84,7 +84,7 @@ selected_camera AS (
     UNION ALL
     SELECT id, parking_id
     FROM camera_table
-    WHERE rtsp_url = '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts'
+    WHERE rtsp_url = '/app/videos/test.ts'
     LIMIT 1
 ),
 spot_base AS (
@@ -247,7 +247,7 @@ WHERE name = 'BaseContainer'
   AND camera_id = (
       SELECT id
       FROM camera_table
-      WHERE rtsp_url = '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts'
+      WHERE rtsp_url = '/app/videos/test.ts'
       LIMIT 1
   )
 UNION ALL
@@ -265,7 +265,7 @@ WHERE name = 'Container3'
   AND camera_id = (
       SELECT id
       FROM camera_table
-      WHERE rtsp_url = '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts'
+      WHERE rtsp_url = '/app/videos/test.ts'
       LIMIT 1
   );
 
@@ -275,7 +275,7 @@ FROM parking_containers
 WHERE camera_id = (
     SELECT id
     FROM camera_table
-    WHERE rtsp_url = '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts'
+    WHERE rtsp_url = '/app/videos/test.ts'
     LIMIT 1
 )
 ON CONFLICT (spot_id) DO UPDATE SET
@@ -292,6 +292,6 @@ SET monitored_spot_ids = (
     ),
     is_calibrated = true,
     segments_config_id = 1
-WHERE rtsp_url = '/home/sergei/Kamera_dvoynaya_5005_vniz_po_sheme_2026-04-21_00-00_2026-04-21_23-59-06.19.50.136-06.26.50.554-seromy.ts';
+WHERE rtsp_url = '/app/videos/test.ts';
 
 COMMIT;

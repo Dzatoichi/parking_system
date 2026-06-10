@@ -125,6 +125,7 @@ class ParkingContainer:
     upper_points: np.ndarray  # (4,3) numpy array
     image_points: Optional[np.ndarray] = None  # (4,2) numpy array или None
     is_base: bool = False
+    spot_id: Optional[int] = None
 
     @property
     def polygon_xz(self) -> np.ndarray:
@@ -199,7 +200,8 @@ class ParkingContainer:
             ground_points=ground_points,
             upper_points=upper_points,
             image_points=image_points,
-            is_base=bool(row.get('is_base', False))
+            is_base=bool(row.get('is_base', False)),
+            spot_id=int(row['spot_id']) if row.get('spot_id') is not None else None
         )
 
     @staticmethod
@@ -229,7 +231,8 @@ class ParkingContainer:
             'ground_points': self.ground_points.tolist(),
             'upper_points': self.upper_points.tolist(),
             'image_points': self.image_points.tolist() if self.image_points is not None else None,
-            'is_base': self.is_base
+            'is_base': self.is_base,
+            'spot_id': self.spot_id
         }
 
     def to_dict(self) -> dict:
@@ -244,7 +247,8 @@ class ParkingContainer:
             'ground_points': self.ground_points.tolist(),
             'upper_points': self.upper_points.tolist(),
             'image_points': self.image_points.tolist() if self.image_points is not None else None,
-            'is_base': self.is_base
+            'is_base': self.is_base,
+            'spot_id': self.spot_id
         }
 
 

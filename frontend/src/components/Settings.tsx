@@ -113,7 +113,7 @@ export function Settings() {
           </div>
           
           <div className="space-y-4">
-            <div>
+            {/* <div>
               <Label htmlFor="refresh-interval">Интервал обновления (секунды)</Label>
               <Input id="refresh-interval" type="number" defaultValue="30" className="mt-1" />
             </div>
@@ -127,7 +127,7 @@ export function Settings() {
               <Label htmlFor="pricing-rate">Почасовая тариф ($)</Label>
               <Input id="pricing-rate" type="number" step="0.01" defaultValue="2.50" className="mt-1" />
             </div>
-            
+             */}
             <div className="flex items-center justify-between">
               <div>
                 <Label htmlFor="dark-mode">Темная тема</Label>
@@ -188,13 +188,13 @@ export function Settings() {
             </div>
           </div>
           
-          <div className="flex items-center space-x-3">
+          {/* <div className="flex items-center space-x-3">
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
             <div>
               <p className="text-sm font-medium text-gray-900">Датчики</p>
               <p className="text-xs text-gray-600">150/150 Активны</p>
             </div>
-          </div>
+          </div> */}
           
           <div className="flex items-center space-x-3">
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>

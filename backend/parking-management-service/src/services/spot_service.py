@@ -19,7 +19,7 @@ from src.schemas import (
 )
 from src.dao.parking_dao import ParkingDAO
 from src.dao.event_dao import EventDAO
-from src.models.system_events import SystemEvent
+from src.services.system_event_ws import system_event_ws_manager
 
 
 class SpotService:
@@ -185,7 +185,7 @@ class SpotService:
         stats = await self._dao.get_stats(spot.parking_id)
         await self._parking_dao.update(spot.parking_id, available_spots=stats["free"])
         if self._event_dao is not None:
-            await self._event_dao.create(
+            event = await self._event_dao.create(
                 {
                     "event_type": "spot_status_changed",
                     "entity_type": "spot",
@@ -201,6 +201,7 @@ class SpotService:
                     },
                 }
             )
+            await system_event_ws_manager.broadcast_event(event)
         return SpotRead.model_validate(updated)
 
     async def update_coordinates(

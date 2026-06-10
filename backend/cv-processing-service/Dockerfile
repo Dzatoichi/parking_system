@@ -12,7 +12,7 @@ RUN apt-get update \
 RUN pip install --no-cache-dir --upgrade pip
 
 # Устанавливаем зависимости по одному (чтобы видеть где ошибка)
-RUN pip install --no-cache-dir fastapi uvicorn[standard] websockets pydantic pydantic-settings httpx aio-pika psycopg2-binary
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" websockets wsproto pydantic pydantic-settings httpx aio-pika psycopg2-binary
 
 RUN pip install --no-cache-dir numpy==1.26.4
 

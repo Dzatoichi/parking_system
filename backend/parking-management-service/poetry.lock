@@ -1627,4 +1627,4 @@ test = ["aiosqlite", "httpx", "pydantic-settings", "pytest", "pytest-asyncio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.12"
-content-hash = "6f5df3f347f205693b036ea47879ca2074160c49e77390cb9b9686ad9547c79b"
+content-hash = "3c8cbe25e67d95d57aef6cd5d6a22ec39529b5f41ad21121df20099dd8d3b54e"

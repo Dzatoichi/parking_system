@@ -66,6 +66,8 @@ class CameraService:
             "position_x": data.position_x,
             "position_y": data.position_y,
             "status": CameraStatus.ACTIVE,
+            "is_calibrated": data.is_calibrated,
+            "monitored_spot_ids": data.monitored_spot_ids,
         }
         camera = await self._dao.create(camera_dict)
         return self._to_read(camera)
@@ -91,7 +93,7 @@ class CameraService:
                     detail=f"Камера с URL '{values['rtsp_url']}' уже существует",
                 )
 
-        updated = await self._dao.update(camera_id, values)
+        updated = await self._dao.update(camera_id, **values)
         return self._to_read(updated)
 
     async def delete_camera(self, camera_id: int) -> None:

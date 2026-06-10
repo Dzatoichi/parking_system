@@ -353,7 +353,7 @@ class ParkingRepository:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("""
-                        SELECT id, camera_id, name, length, width, height,
+                        SELECT id, camera_id, spot_id, name, length, width, height,
                                ground_points, upper_points, image_points, is_base,
                                created_at, updated_at
                         FROM parking_containers
@@ -384,7 +384,7 @@ class ParkingRepository:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("""
-                        SELECT id, camera_id, name, length, width, height,
+                        SELECT id, camera_id, spot_id, name, length, width, height,
                                ground_points, upper_points, image_points, is_base,
                                created_at, updated_at
                         FROM parking_containers
@@ -408,7 +408,7 @@ class ParkingRepository:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("""
-                        SELECT id, camera_id, name, length, width, height,
+                        SELECT id, camera_id, spot_id, name, length, width, height,
                                ground_points, upper_points, image_points, is_base,
                                created_at, updated_at
                         FROM parking_containers

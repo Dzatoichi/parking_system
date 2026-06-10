@@ -147,10 +147,10 @@ export function ParkingMap() {
             </SelectContent>
           </Select>
 
-          <Button onClick={handleRefresh} variant="outline" className="gap-2">
+          {/* <Button onClick={handleRefresh} variant="outline" className="gap-2">
             <RefreshCw className="w-4 h-4" />
             Обновить
-          </Button>
+          </Button> */}
         </div>
       </div>
 

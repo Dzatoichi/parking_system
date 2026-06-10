@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getApiErrorMessage } from "../lib/api";
+import { parkingWsUrl } from "../lib/ws";
 import {
   analyticsApi,
   bookingApi,
@@ -13,12 +15,16 @@ import {
 import { useActiveParking } from "./useActiveParking";
 
 const DASHBOARD_POLL_INTERVAL_MS = 30_000;
+const EVENTS_WS_RECONNECT_MS = 3_000;
+const WS_CONNECT_DELAY_MS = 100;
 const NO_ACTIVE_PARKING_MESSAGE =
   "Нет активных парковок. Добавьте данные в БД.";
 
 export function useDashboardData() {
+  const queryClient = useQueryClient();
   const parkingQuery = useActiveParking({ refetchInterval: DASHBOARD_POLL_INTERVAL_MS });
   const parkingId = parkingQuery.data?.id ?? null;
+  const reconnectTimerRef = useRef<number | null>(null);
 
   const statsQuery = useQuery<ParkingStats>({
     queryKey: ["parkingStats", parkingId],
@@ -49,6 +55,60 @@ export function useDashboardData() {
     enabled: parkingId != null,
     refetchInterval: DASHBOARD_POLL_INTERVAL_MS,
   });
+
+  useEffect(() => {
+    if (parkingId == null) return undefined;
+
+    let closedByEffect = false;
+    let connectedOnce = false;
+    let ws: WebSocket | null = null;
+
+    const refreshDashboard = () => {
+      void queryClient.invalidateQueries({ queryKey: ["parkingAnalyticsOverview", parkingId] });
+      void queryClient.invalidateQueries({ queryKey: ["parkingStats", parkingId] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboardBookings", parkingId] });
+    };
+
+    const connect = () => {
+      ws = new WebSocket(parkingWsUrl("/events/ws"));
+
+      ws.onopen = () => {
+        connectedOnce = true;
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as { type?: string; parking_id?: number };
+          if (payload.type !== "system_event_changed") return;
+          if (payload.parking_id !== parkingId) return;
+
+          refreshDashboard();
+        } catch {
+          return;
+        }
+      };
+
+      ws.onerror = () => undefined;
+
+      ws.onclose = () => {
+        if (closedByEffect) return;
+        if (!connectedOnce) return;
+        reconnectTimerRef.current = window.setTimeout(connect, EVENTS_WS_RECONNECT_MS);
+      };
+    };
+
+    reconnectTimerRef.current = window.setTimeout(connect, WS_CONNECT_DELAY_MS);
+
+    return () => {
+      closedByEffect = true;
+      if (reconnectTimerRef.current != null) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
+      if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    };
+  }, [parkingId, queryClient]);
 
   const error =
     getApiErrorMessage(

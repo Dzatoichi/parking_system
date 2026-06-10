@@ -67,7 +67,7 @@ export function Analytics() {
                 <div>
                   <p className="text-sm font-medium text-gray-600">{metric.label}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">{metric.value}</p>
-                  <p className={`text-sm mt-1 ${metric.color}`}>{metric.change || "живые данные"}</p>
+                  {/* <p className={`text-sm mt-1 ${metric.color}`}>{metric.change || "живые данные"}</p> */}
                 </div>
                 <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
                   <Icon className="w-5 h-5 text-gray-600" />

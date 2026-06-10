@@ -7,6 +7,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -197,6 +198,7 @@ export default function App() {
         parkingId: selectedParking.id,
         spotId: selectedSpot.id,
         vehicleId: vehicles[0]?.id,
+        vehiclePlate: vehicles[0]?.plate_number ?? vehicles[0]?.number_plate,
         startTime: bookingTimeSlot.startTime,
         endTime: bookingTimeSlot.endTime,
         hourlyRate,
@@ -478,6 +480,10 @@ function ParkingScreen({
   onBook: () => void;
 }) {
   const freeCount = spots.filter((spot) => spot.status === 1).length;
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(bookingTimeSlot.startTime));
+  const hourlyRate = selectedSpot?.hourly_rate ?? 100;
+  const bookingCost = calculateBookingCost(hourlyRate, bookingTimeSlot);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
@@ -549,52 +555,48 @@ function ParkingScreen({
         </View>
         <View style={styles.dateInputRow}>
           <Text style={styles.fieldLabel}>Дата</Text>
-          <TextInput
-            keyboardType="numbers-and-punctuation"
-            onChangeText={(date) => onBookingTimeSlotChange(setBookingDate(bookingTimeSlot, date))}
-            placeholder="YYYY-MM-DD"
-            style={[styles.input, styles.compactInput, styles.dateInput]}
-            value={formatDateInput(bookingTimeSlot.startTime)}
-          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setCalendarMonth(new Date(bookingTimeSlot.startTime));
+              setCalendarVisible(true);
+            }}
+            style={[styles.input, styles.compactInput, styles.dateButton]}
+          >
+            <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+            <Text style={styles.dateButtonText}>{formatDateInput(bookingTimeSlot.startTime)}</Text>
+          </Pressable>
         </View>
         <View style={styles.clockGrid}>
           <View style={styles.clockGroup}>
             <Text style={styles.fieldLabel}>Начало</Text>
             <View style={styles.clockInputs}>
-              <TextInput
-                keyboardType="number-pad"
-                maxLength={2}
-                onChangeText={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", hour, padClock(bookingTimeSlot.startTime.getMinutes())))}
-                style={[styles.input, styles.compactInput, styles.clockInput]}
-                value={padClock(bookingTimeSlot.startTime.getHours())}
+              <TimePartInput
+                max={23}
+                value={bookingTimeSlot.startTime.getHours()}
+                onCommit={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", String(hour), padClock(bookingTimeSlot.startTime.getMinutes())))}
               />
               <Text style={styles.clockSeparator}>:</Text>
-              <TextInput
-                keyboardType="number-pad"
-                maxLength={2}
-                onChangeText={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", padClock(bookingTimeSlot.startTime.getHours()), minute))}
-                style={[styles.input, styles.compactInput, styles.clockInput]}
-                value={padClock(bookingTimeSlot.startTime.getMinutes())}
+              <TimePartInput
+                max={59}
+                value={bookingTimeSlot.startTime.getMinutes()}
+                onCommit={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", padClock(bookingTimeSlot.startTime.getHours()), String(minute)))}
               />
             </View>
           </View>
           <View style={styles.clockGroup}>
             <Text style={styles.fieldLabel}>Окончание</Text>
             <View style={styles.clockInputs}>
-              <TextInput
-                keyboardType="number-pad"
-                maxLength={2}
-                onChangeText={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", hour, padClock(bookingTimeSlot.endTime.getMinutes())))}
-                style={[styles.input, styles.compactInput, styles.clockInput]}
-                value={padClock(bookingTimeSlot.endTime.getHours())}
+              <TimePartInput
+                max={23}
+                value={bookingTimeSlot.endTime.getHours()}
+                onCommit={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", String(hour), padClock(bookingTimeSlot.endTime.getMinutes())))}
               />
               <Text style={styles.clockSeparator}>:</Text>
-              <TextInput
-                keyboardType="number-pad"
-                maxLength={2}
-                onChangeText={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", padClock(bookingTimeSlot.endTime.getHours()), minute))}
-                style={[styles.input, styles.compactInput, styles.clockInput]}
-                value={padClock(bookingTimeSlot.endTime.getMinutes())}
+              <TimePartInput
+                max={59}
+                value={bookingTimeSlot.endTime.getMinutes()}
+                onCommit={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", padClock(bookingTimeSlot.endTime.getHours()), String(minute)))}
               />
             </View>
           </View>
@@ -605,8 +607,20 @@ function ParkingScreen({
         </View>
         <View style={styles.bookingEstimate}>
           <Text style={styles.mutedText}>Длительность: {formatBookingDuration(bookingTimeSlot)}</Text>
+          <Text style={styles.mutedText}>Расчет: {hourlyRate} ₽/час = {bookingCost} ₽</Text>
         </View>
       </View>
+      <CalendarModal
+        month={calendarMonth}
+        selectedDate={bookingTimeSlot.startTime}
+        visible={calendarVisible}
+        onClose={() => setCalendarVisible(false)}
+        onMonthChange={setCalendarMonth}
+        onSelectDate={(date) => {
+          onBookingTimeSlotChange(setBookingDate(bookingTimeSlot, formatDateInput(date)));
+          setCalendarVisible(false);
+        }}
+      />
 
       {selectedSpot ? (
         <View style={styles.spotInfoPanel}>
@@ -624,7 +638,7 @@ function ParkingScreen({
           </View>
           <View style={styles.detailRowCompact}>
             <Text style={styles.detailLabel}>Стоимость</Text>
-            <Text style={styles.detailValue}>{calculateBookingCost(selectedSpot.hourly_rate ?? 100, bookingTimeSlot)} ₽</Text>
+            <Text style={styles.detailValue}>{bookingCost} ₽</Text>
           </View>
         </View>
       ) : null}
@@ -877,6 +891,99 @@ function SecondaryButton({
   );
 }
 
+function TimePartInput({ value, max, onCommit }: { value: number; max: number; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(() => padClock(value));
+
+  useEffect(() => {
+    setDraft(padClock(value));
+  }, [value]);
+
+  function commit() {
+    if (!draft.trim()) {
+      setDraft(padClock(value));
+      return;
+    }
+    const parsed = Number(draft);
+    if (!Number.isInteger(parsed)) {
+      setDraft(padClock(value));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(0, parsed));
+    setDraft(padClock(clamped));
+    onCommit(clamped);
+  }
+
+  return (
+    <TextInput
+      keyboardType="number-pad"
+      maxLength={2}
+      onBlur={commit}
+      onChangeText={(text) => setDraft(text.replace(/\D/g, "").slice(0, 2))}
+      onSubmitEditing={commit}
+      selectTextOnFocus
+      style={[styles.input, styles.compactInput, styles.clockInput]}
+      value={draft}
+    />
+  );
+}
+
+function CalendarModal({
+  visible,
+  month,
+  selectedDate,
+  onClose,
+  onMonthChange,
+  onSelectDate
+}: {
+  visible: boolean;
+  month: Date;
+  selectedDate: Date;
+  onClose: () => void;
+  onMonthChange: (month: Date) => void;
+  onSelectDate: (date: Date) => void;
+}) {
+  const days = getCalendarDays(month);
+  const monthTitle = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(month);
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.calendarPanel}>
+          <View style={styles.calendarHeader}>
+            <Pressable accessibilityRole="button" onPress={() => onMonthChange(addCalendarMonths(month, -1))} style={styles.iconButton}>
+              <Ionicons name="chevron-back-outline" size={22} color={colors.primary} />
+            </Pressable>
+            <Text style={styles.calendarTitle}>{monthTitle}</Text>
+            <Pressable accessibilityRole="button" onPress={() => onMonthChange(addCalendarMonths(month, 1))} style={styles.iconButton}>
+              <Ionicons name="chevron-forward-outline" size={22} color={colors.primary} />
+            </Pressable>
+          </View>
+          <View style={styles.weekRow}>
+            {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => (
+              <Text key={day} style={styles.weekdayText}>{day}</Text>
+            ))}
+          </View>
+          <View style={styles.calendarGrid}>
+            {days.map((day, index) => {
+              const isSelected = day && formatDateInput(day) === formatDateInput(selectedDate);
+              return (
+                <Pressable
+                  key={day ? formatDateInput(day) : `blank-${index}`}
+                  disabled={!day}
+                  onPress={() => day && onSelectDate(day)}
+                  style={[styles.calendarDay, isSelected && styles.calendarDaySelected, !day && styles.calendarDayBlank]}
+                >
+                  <Text style={[styles.calendarDayText, isSelected && styles.calendarDayTextSelected]}>{day ? day.getDate() : ""}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
@@ -899,14 +1006,32 @@ function padClock(value: number) {
   return value.toString().padStart(2, "0");
 }
 
+function addCalendarMonths(value: Date, months: number) {
+  return new Date(value.getFullYear(), value.getMonth() + months, 1);
+}
+
+function getCalendarDays(month: Date) {
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const mondayBasedOffset = (firstDay.getDay() + 6) % 7;
+  const days: Array<Date | null> = Array.from({ length: mondayBasedOffset }, () => null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    days.push(new Date(month.getFullYear(), month.getMonth(), day));
+  }
+  while (days.length % 7 !== 0) {
+    days.push(null);
+  }
+  return days;
+}
+
 function getBookingAmount(booking: Booking) {
   if (booking.total_cost && booking.total_cost > 0) {
     return Math.round(booking.total_cost);
   }
   const start = new Date(booking.start_time).getTime();
   const end = new Date(booking.end_time).getTime();
-  const hours = Number.isFinite(start) && Number.isFinite(end) ? Math.max(1, Math.ceil((end - start) / 3_600_000)) : 2;
-  return Math.round((booking.hourly_rate ?? 100) * hours);
+  const minutes = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.ceil((end - start) / 60_000)) : 0;
+  return Math.round(((booking.hourly_rate ?? 100) * minutes) / 60);
 }
 
 function getBookingStatusText(status: number) {
@@ -1191,6 +1316,16 @@ const styles = StyleSheet.create({
   dateInput: {
     width: "100%"
   },
+  dateButton: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm
+  },
+  dateButtonText: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800"
+  },
   clockGrid: {
     flexDirection: "row",
     gap: spacing.md
@@ -1221,6 +1356,79 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     borderTopWidth: 1,
     paddingTop: spacing.sm
+  },
+  modalBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.36)",
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg
+  },
+  calendarPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    maxWidth: 360,
+    padding: spacing.lg,
+    width: "100%"
+  },
+  calendarHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: spacing.md
+  },
+  calendarTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+    textTransform: "capitalize"
+  },
+  iconButton: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: 6,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: "center",
+    width: 40
+  },
+  weekRow: {
+    flexDirection: "row",
+    marginBottom: spacing.xs
+  },
+  weekdayText: {
+    color: colors.muted,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center"
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap"
+  },
+  calendarDay: {
+    alignItems: "center",
+    aspectRatio: 1,
+    borderRadius: 6,
+    justifyContent: "center",
+    width: "14.2857%"
+  },
+  calendarDayBlank: {
+    opacity: 0
+  },
+  calendarDaySelected: {
+    backgroundColor: colors.primary
+  },
+  calendarDayText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  calendarDayTextSelected: {
+    color: "#FFFFFF"
   },
   durationRow: {
     flexDirection: "row",

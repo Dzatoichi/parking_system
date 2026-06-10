@@ -362,10 +362,10 @@ function CamerasManager() {
           </div>
           <div className="space-y-3">
             <FormField
-              label="RTSP URL *"
+              label="Источник видео *"
               value={form.rtsp_url}
               onChange={(v) => setForm({ ...form, rtsp_url: v })}
-              placeholder="rtsp://..."
+              placeholder="/app/videos/test.ts или rtsp://..."
             />
             <div className="grid grid-cols-2 gap-3">
               <FormField
@@ -445,7 +445,7 @@ function CamerasManager() {
               </div>
               <div className="text-xs text-gray-500 space-y-1">
                 <p className="truncate" title={camera.rtsp_url}>
-                  <span className="font-medium text-gray-700">RTSP:</span>{" "}
+                  <span className="font-medium text-gray-700">Источник:</span>{" "}
                   {camera.rtsp_url}
                 </p>
                 <p>

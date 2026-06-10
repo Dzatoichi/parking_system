@@ -10,6 +10,7 @@ import {
   type ParkingSceneVehicle,
 } from "../services/pmApi";
 import { getApiErrorMessage } from "../lib/api";
+import { cvWsUrl } from "../lib/ws";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -52,8 +53,7 @@ export function ParkingSceneWidget() {
   });
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/cv/v1/monitoring/scenes/ws`);
+    const ws = new WebSocket(cvWsUrl("/v1/monitoring/scenes/ws"));
 
     ws.onmessage = (event) => {
       try {
@@ -75,7 +75,9 @@ export function ParkingSceneWidget() {
     };
 
     return () => {
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
     };
   }, []);
 
@@ -83,7 +85,7 @@ export function ParkingSceneWidget() {
   const cameraIds = Object.keys(scenes).sort((a, b) => Number(a) - Number(b));
   const cameraIdsKey = cameraIds.join("|");
   const firstCameraId = cameraIds[0] ?? "";
-  const error = wsError || getApiErrorMessage(scenesQuery.error, "");
+  const error = getApiErrorMessage(scenesQuery.error, "");
   const topWidgetId = widgets[0]?.id ?? null;
 
   useEffect(() => {
@@ -182,10 +184,10 @@ export function ParkingSceneWidget() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => scenesQuery.refetch()}>
+          {/* <Button variant="outline" className="gap-2" onClick={() => scenesQuery.refetch()}>
             <RefreshCw className="h-4 w-4" />
             Обновить
-          </Button>
+          </Button> */}
 
           {editMode && (
             <Button
@@ -297,6 +299,20 @@ function SceneWidget({
     drawScene(canvasRef.current, scene, widget);
   }, [scene, widget]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || editMode) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      onUpdate({ zoom: clamp(widget.zoom * factor, 0.05, 80) });
+    };
+
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [editMode, onUpdate, widget.zoom]);
+
   const widgetStyle = useMemo(
     () => ({
       left: widget.x,
@@ -399,12 +415,6 @@ function SceneWidget({
         }}
         onMouseUp={() => setPanStart(null)}
         onMouseLeave={() => setPanStart(null)}
-        onWheel={(event) => {
-          if (editMode) return;
-          event.preventDefault();
-          const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-          onUpdate({ zoom: clamp(widget.zoom * factor, 0.05, 80) });
-        }}
       />
 
         {!scene && (

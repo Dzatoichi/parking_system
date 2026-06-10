@@ -83,7 +83,7 @@ class ParkingService:
         if not values:
             return self._to_read(existing)
 
-        updated = await self._dao.update(parking_id, values)
+        updated = await self._dao.update(parking_id, **values)
         return self._to_read(updated)
 
     async def delete_parking(self, parking_id: int) -> None:
