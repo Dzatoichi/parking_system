@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import datetime
 
-from sqlalchemy import Integer, String, Enum, ForeignKey, UniqueConstraint, JSON, DateTime
+from sqlalchemy import Boolean, Float, Integer, String, Enum, ForeignKey, UniqueConstraint, JSON, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database.base import Base
@@ -43,6 +43,10 @@ class Spot(Base):
         nullable=False,
         index=True,
     )
+    owner_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    rental_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    hourly_rate: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
+    penalty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     # Связи
     parking: Mapped["ParkingBase"] = relationship(back_populates="spots")

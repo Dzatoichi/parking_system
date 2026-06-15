@@ -40,27 +40,48 @@ class ParkingSpotManager:
                 consecutive_frames=0
             )
 
-    def update_from_detection(self, spot_id: int, track_id: int, timestamp: float):
-        """Вызывается из ParkingMonitor при обнаружении автомобиля на месте"""
+
+    def update_from_detection(
+    self,
+    spot_id: int,
+    track_id: int,
+    timestamp: float,
+):
         with self.lock:
-            # print(self.spots)
             if spot_id not in self.spots:
-                # Новое место – создаём в состоянии FREE
-                self.spots[spot_id] = ParkingSpotState(spot_id=spot_id, status=SpotStatus.FREE)
+                self.spots[spot_id] = ParkingSpotState(
+                    spot_id=spot_id,
+                    status=SpotStatus.FREE,
+                )
 
             state = self.spots[spot_id]
 
-            # Если уже подтверждено тем же авто – ничего не делаем
-            if state.status == SpotStatus.PARKING_CONFIRMED and state.vehicle_track_id == track_id:
+            # Место подтверждённо занято.
+            # Новый track_id не означает освобождение места.
+            if state.status == SpotStatus.PARKING_CONFIRMED:
                 state.last_seen_time = timestamp
+
+                if state.vehicle_track_id != track_id:
+                    print(
+                        f"Spot {spot_id}: track changed "
+                        f"{state.vehicle_track_id} -> {track_id}, "
+                        f"keeping spot occupied"
+                    )
+                    state.vehicle_track_id = track_id
+
+                    # При необходимости синхронизируем только vehicle_track_id,
+                    # но не переводим место в free.
+                    self.db.update_current_spot(
+                        spot_id=spot_id,
+                        status="occupied",
+                        vehicle_track_id=track_id,
+                        parked_since=state.confirmed_time,
+                    )
+
                 return
 
-            # Если место свободно или занято другим авто – начинаем отсчёт
-            if state.status == SpotStatus.FREE or state.vehicle_track_id != track_id:
-                # Освобождаем предыдущего, если был
-                if state.status != SpotStatus.FREE:
-                    self._free_spot(spot_id, timestamp)
-
+            # Свободное место — начинаем подтверждение парковки.
+            if state.status == SpotStatus.FREE:
                 state.status = SpotStatus.PARKING_PENDING
                 state.vehicle_track_id = track_id
                 state.first_seen_time = timestamp
@@ -68,14 +89,29 @@ class ParkingSpotManager:
                 state.consecutive_frames = 1
                 return
 
-            # То же авто, уже в pending
-            if state.status == SpotStatus.PARKING_PENDING and state.vehicle_track_id == track_id:
+            # Место ожидает подтверждения.
+            if state.status == SpotStatus.PARKING_PENDING:
                 state.last_seen_time = timestamp
-                state.consecutive_frames += 1
 
-                # Проверяем порог подтверждения
+                if state.vehicle_track_id == track_id:
+                    state.consecutive_frames += 1
+                else:
+                    # Не освобождаем место.
+                    # Перезапускаем подтверждение для нового трека.
+                    print(
+                        f"Spot {spot_id}: pending track changed "
+                        f"{state.vehicle_track_id} -> {track_id}"
+                    )
+                    state.vehicle_track_id = track_id
+                    state.first_seen_time = timestamp
+                    state.consecutive_frames = 1
+
                 if state.consecutive_frames >= self.confirmation_frames:
-                    self._confirm_parking(spot_id, track_id, timestamp)
+                    self._confirm_parking(
+                        spot_id,
+                        state.vehicle_track_id,
+                        timestamp,
+                    )
 
     def update_from_absence(self, spot_id: int, timestamp: float):
         with self.lock:
@@ -85,7 +121,11 @@ class ParkingSpotManager:
             if state.status in (SpotStatus.PARKING_CONFIRMED, SpotStatus.PARKING_PENDING):
                 if state.last_seen_time is not None and (
                         timestamp - state.last_seen_time) > self.absence_timeout_seconds:
-                    self._free_spot(spot_id, timestamp)
+                    self._free_spot(
+                        spot_id,
+                        timestamp,
+                        reason="absence_timeout",
+                    )
 
     def _confirm_parking(self, spot_id: int, track_id: int, timestamp: float):
         with self.lock:
@@ -99,11 +139,40 @@ class ParkingSpotManager:
             self.db.update_current_spot(spot_id, 'occupied', track_id, state.confirmed_time)
             print(f"Spot {spot_id} confirmed occupied by vehicle {track_id}")
 
-    def _free_spot(self, spot_id: int, timestamp: float):
+    def _free_spot(
+        self,
+        spot_id: int,
+        timestamp: float,
+        reason: str = "absence_timeout",
+    ):
         state = self.spots[spot_id]
-        if state.status == SpotStatus.PARKING_CONFIRMED:
-            self.db.mark_spot_free(spot_id)  # закрывает период в логе
-            self.db.update_current_spot(spot_id, 'free', None, None)
+
+        previous_status = state.status
+        previous_vehicle_id = state.vehicle_track_id
+        last_seen_time = state.last_seen_time
+
+        # В БД пишем free только для реально подтверждённой парковки.
+        if previous_status == SpotStatus.PARKING_CONFIRMED:
+            self.db.mark_spot_free(spot_id)
+            self.db.update_current_spot(
+                spot_id=spot_id,
+                status="free",
+                vehicle_track_id=None,
+                parked_since=None,
+            )
+
+            print(
+                f"Spot {spot_id} confirmed free: "
+                f"vehicle={previous_vehicle_id}, "
+                f"reason={reason}, "
+                f"absence={timestamp - last_seen_time if last_seen_time is not None else None}"
+            )
+        else:
+            print(
+                f"Spot {spot_id} pending reset: "
+                f"vehicle={previous_vehicle_id}, "
+                f"reason={reason}"
+            )
 
         state.status = SpotStatus.FREE
         state.vehicle_track_id = None

@@ -1,13 +1,17 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -27,10 +31,13 @@ import {
   createBooking,
   createMockPayment,
   getParkings,
+  getOwnerSpotReport,
+  getOwnerSpots,
   getSpots,
   getVehicles,
   isUnauthorizedError,
   login,
+  registerOwnerSpot,
   register,
   updateOwnerSpot
 } from "./src/application/mobileServices";
@@ -49,13 +56,13 @@ import {
 } from "./src/domain/booking/bookingTime";
 import { clearStoredSession, loadStoredSession, saveStoredSession, sessionTtlMs } from "./src/application/mobileServices";
 import { colors, spacing } from "./src/theme";
-import { AuthSession, Booking, Parking, ParkingSpot, Payment, Vehicle } from "./src/types";
+import { AuthSession, Booking, OwnerSpotReport, Parking, ParkingSpot, Payment, Vehicle, VehiclePhotos } from "./src/types";
 
 type TabKey = "parkings" | "booking" | "vehicle" | "owner" | "profile";
 
 const tabs: Array<{ key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { key: "parkings", label: "Парковки", icon: "map-outline" },
-  { key: "booking", label: "Бронь", icon: "time-outline" },
+  { key: "booking", label: "Бронирования", icon: "time-outline" },
   { key: "vehicle", label: "Авто", icon: "car-outline" },
   { key: "owner", label: "Места", icon: "business-outline" },
   { key: "profile", label: "Профиль", icon: "person-outline" }
@@ -66,6 +73,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("parkings");
   const [parkings, setParkings] = useState<Parking[]>([]);
   const [spots, setSpots] = useState<ParkingSpot[]>([]);
+  const [ownerSpots, setOwnerSpots] = useState<ParkingSpot[]>([]);
+  const [ownerReports, setOwnerReports] = useState<Record<number, OwnerSpotReport>>({});
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedParking, setSelectedParking] = useState<Parking | null>(null);
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
@@ -119,7 +128,7 @@ export default function App() {
         .then((freshSpots) => setSpots(freshSpots))
         .catch((error) => {
           if (isUnauthorizedError(error)) {
-            handleError(error, "РќСѓР¶РЅРѕ РІРѕР№С‚Рё Р·Р°РЅРѕРІРѕ");
+            handleError(error, "Нужно войти заново");
           }
         });
     }, 15_000);
@@ -137,18 +146,23 @@ export default function App() {
   }
 
   async function loadInitialData() {
+    if (!session) {
+      return;
+    }
     setLoading(true);
     setErrorBanner(null);
     try {
       const [parkingList, vehicleList, currentBooking] = await Promise.all([
         getParkings(token),
         getVehicles(token),
-        getActiveBooking(token)
+        getActiveBooking(session.userId, token)
       ]);
       setParkings(parkingList);
       setVehicles(vehicleList);
       setActiveBooking(currentBooking);
       setActivePayment(null);
+      setOwnerSpots(await getOwnerSpots(token));
+      setOwnerReports({});
       const firstParking = parkingList[0] ?? null;
       setSelectedParking(firstParking);
       if (firstParking) {
@@ -178,6 +192,13 @@ export default function App() {
   async function bookSelectedSpot() {
     if (!session || !selectedParking || !selectedSpot) {
       Alert.alert("Выберите место", "Сначала выберите парковку и свободное парковочное место.");
+      return;
+    }
+
+    if (vehicles.length === 0) {
+      setSelectedSpot(null);
+      setActiveTab("vehicle");
+      Alert.alert("Добавьте автомобиль", "Перед бронированием нужно добавить данные автомобиля.");
       return;
     }
 
@@ -216,8 +237,8 @@ export default function App() {
     }
   }
 
-  async function addCar(numberPlate: string) {
-    if (!numberPlate.trim()) {
+  async function addCar(input: { numberPlate: string; brand?: string; color?: string; photos?: VehiclePhotos }) {
+    if (!input.numberPlate.trim()) {
       Alert.alert("Введите номер", "Например: А123ВС124.");
       return;
     }
@@ -225,7 +246,7 @@ export default function App() {
     setLoading(true);
     setErrorBanner(null);
     try {
-      const vehicle = await addVehicle(numberPlate, token);
+      const vehicle = await addVehicle({ ...input, token });
       setVehicles((current) => [vehicle, ...current]);
     } catch (error) {
       handleError(error, "Автомобиль не добавлен");
@@ -283,12 +304,57 @@ export default function App() {
 
   async function toggleOwnerSpot(spot: ParkingSpot) {
     const nextIsFree = spot.status !== 1;
-    setSpots((current) => current.map((item) => (item.id === spot.id ? { ...item, status: nextIsFree ? 1 : 2 } : item)));
+    const nextSpot = { ...spot, status: nextIsFree ? 1 : 2, rental_enabled: nextIsFree };
+    setOwnerSpots((current) => current.map((item) => (item.id === spot.id ? nextSpot : item)));
     try {
-      await updateOwnerSpot(spot.id, nextIsFree, token);
+      const updated = await updateOwnerSpot({ spotId: spot.id, isFree: nextIsFree, token });
+      setOwnerSpots((current) => current.map((item) => (item.id === spot.id ? updated : item)));
     } catch (error) {
-      setSpots((current) => current.map((item) => (item.id === spot.id ? spot : item)));
+      setOwnerSpots((current) => current.map((item) => (item.id === spot.id ? spot : item)));
       handleError(error, "Статус не обновлен");
+    }
+  }
+
+  async function saveOwnerSpotPrice(spot: ParkingSpot, hourlyRate: number, penalty: number) {
+    setLoading(true);
+    setErrorBanner(null);
+    try {
+      const updated = await updateOwnerSpot({ spotId: spot.id, hourlyRate, penalty, token });
+      setOwnerSpots((current) => current.map((item) => (item.id === spot.id ? updated : item)));
+    } catch (error) {
+      handleError(error, "Цена места не обновлена");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function registerSpotOwnership(spotId: number, hourlyRate: number, penalty: number) {
+    if (!spotId || spotId <= 0) {
+      Alert.alert("Проверьте место", "Укажите ID места из карты парковки.");
+      return;
+    }
+    setLoading(true);
+    setErrorBanner(null);
+    try {
+      const created = await registerOwnerSpot({ spotId, hourlyRate, penalty, rentalEnabled: false, token });
+      setOwnerSpots((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+    } catch (error) {
+      handleError(error, "Место не зарегистрировано");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadOwnerSpotReport(spot: ParkingSpot) {
+    setLoading(true);
+    setErrorBanner(null);
+    try {
+      const report = await getOwnerSpotReport(spot.id, token);
+      setOwnerReports((current) => ({ ...current, [spot.id]: report }));
+    } catch (error) {
+      handleError(error, "Отчет по месту не загружен");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -328,7 +394,7 @@ export default function App() {
       <StatusBar style="dark" />
       <View style={styles.header}>
         <View>
-          <Text style={styles.appName}>Smart Parking</Text>
+          <Text style={styles.appName}>Зелённые парковки</Text>
           <Text style={styles.headerSubtitle}>Бронирование и аренда парковочных мест</Text>
         </View>
         {loading ? <ActivityIndicator color={colors.primary} /> : null}
@@ -351,6 +417,7 @@ export default function App() {
             spots={spots}
             selectedSpot={selectedSpot}
             bookingTimeSlot={bookingTimeSlot}
+            hasVehicles={vehicles.length > 0}
             onSelectParking={selectParking}
             onSelectSpot={setSelectedSpot}
             onBookingTimeSlotChange={setBookingTimeSlot}
@@ -368,7 +435,15 @@ export default function App() {
         ) : null}
         {activeTab === "vehicle" ? <VehicleScreen vehicles={vehicles} onAddVehicle={addCar} /> : null}
         {activeTab === "owner" ? (
-          <OwnerScreen spots={spots} onToggleSpot={toggleOwnerSpot} />
+          <OwnerScreen
+            availableSpots={spots}
+            spots={ownerSpots}
+            reports={ownerReports}
+            onLoadReport={loadOwnerSpotReport}
+            onRegisterSpot={registerSpotOwnership}
+            onSavePrice={saveOwnerSpotPrice}
+            onToggleSpot={toggleOwnerSpot}
+          />
         ) : null}
         {activeTab === "profile" ? <ProfileScreen session={session} onLogout={() => void applySession(null)} /> : null}
       </View>
@@ -423,7 +498,7 @@ function AuthScreen({ onSession }: { onSession: (session: AuthSession) => void }
     <View style={styles.safeArea}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.authWrap}>
-        <Text style={styles.authTitle}>Smart Parking</Text>
+        <Text style={styles.authTitle}>Зелённые парковки</Text>
         <Text style={styles.authSubtitle}>Мобильный кабинет арендатора и владельца парковочного места</Text>
 
         <View style={styles.segment}>
@@ -464,6 +539,7 @@ function ParkingScreen({
   spots,
   selectedSpot,
   bookingTimeSlot,
+  hasVehicles,
   onSelectParking,
   onSelectSpot,
   onBookingTimeSlotChange,
@@ -474,8 +550,9 @@ function ParkingScreen({
   spots: ParkingSpot[];
   selectedSpot: ParkingSpot | null;
   bookingTimeSlot: BookingTimeSlot;
+  hasVehicles: boolean;
   onSelectParking: (parking: Parking) => void;
-  onSelectSpot: (spot: ParkingSpot) => void;
+  onSelectSpot: (spot: ParkingSpot | null) => void;
   onBookingTimeSlotChange: (slot: BookingTimeSlot) => void;
   onBook: () => void;
 }) {
@@ -484,6 +561,40 @@ function ParkingScreen({
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(bookingTimeSlot.startTime));
   const hourlyRate = selectedSpot?.hourly_rate ?? 100;
   const bookingCost = calculateBookingCost(hourlyRate, bookingTimeSlot);
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const sheetPanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          sheetTranslateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 90 || gestureState.vy > 0.8) {
+          Animated.timing(sheetTranslateY, {
+            duration: 180,
+            toValue: 420,
+            useNativeDriver: true
+          }).start(() => {
+            sheetTranslateY.setValue(0);
+            onSelectSpot(null);
+          });
+          return;
+        }
+        Animated.spring(sheetTranslateY, {
+          toValue: 0,
+          useNativeDriver: true
+        }).start();
+      }
+    })
+  ).current;
+
+  useEffect(() => {
+    if (selectedSpot) {
+      sheetTranslateY.setValue(0);
+    }
+  }, [selectedSpot, sheetTranslateY]);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
@@ -521,6 +632,12 @@ function ParkingScreen({
       </View>
 
       <Text style={styles.sectionTitle}>Карта парковки</Text>
+      {!hasVehicles ? (
+        <View style={styles.notice}>
+          <Ionicons name="car-outline" size={22} color={colors.primary} />
+          <Text style={styles.noticeText}>Чтобы бронировать места, сначала добавьте данные автомобиля во вкладке «Авто».</Text>
+        </View>
+      ) : null}
       <View style={styles.mapGrid}>
         {spots.map((spot) => {
           const isFree = spot.status === 1;
@@ -528,11 +645,11 @@ function ParkingScreen({
           return (
             <Pressable
               key={spot.id}
-              disabled={!isFree}
+              disabled={!isFree || !hasVehicles}
               onPress={() => onSelectSpot(spot)}
               style={[
                 styles.spot,
-                !isFree && styles.spotBusy,
+                (!isFree || !hasVehicles) && styles.spotBusy,
                 spot.for_disabled && styles.spotSpecial,
                 isSelected && styles.spotSelected
               ]}
@@ -543,6 +660,7 @@ function ParkingScreen({
         })}
       </View>
 
+      {false ? (
       <View style={styles.timePanel}>
         <View>
           <Text style={styles.panelKicker}>Время бронирования</Text>
@@ -610,6 +728,7 @@ function ParkingScreen({
           <Text style={styles.mutedText}>Расчет: {hourlyRate} ₽/час = {bookingCost} ₽</Text>
         </View>
       </View>
+      ) : null}
       <CalendarModal
         month={calendarMonth}
         selectedDate={bookingTimeSlot.startTime}
@@ -622,28 +741,67 @@ function ParkingScreen({
         }}
       />
 
-      {selectedSpot ? (
-        <View style={styles.spotInfoPanel}>
-          <View style={styles.detailRowCompact}>
-            <Text style={styles.detailLabel}>ID места</Text>
-            <Text style={styles.detailValue}>{selectedSpot.id}</Text>
-          </View>
-          <View style={styles.detailRowCompact}>
-            <Text style={styles.detailLabel}>Статус</Text>
-            <Text style={styles.detailValue}>{selectedSpot.status === 1 ? "Доступно" : "Недоступно"}</Text>
-          </View>
-          <View style={styles.detailRowCompact}>
-            <Text style={styles.detailLabel}>Период доступности</Text>
-            <Text style={styles.detailValue}>{formatAvailability(selectedSpot)}</Text>
-          </View>
-          <View style={styles.detailRowCompact}>
-            <Text style={styles.detailLabel}>Стоимость</Text>
-            <Text style={styles.detailValue}>{bookingCost} ₽</Text>
-          </View>
-        </View>
-      ) : null}
 
-      <PrimaryButton label="Забронировать выбранное место" icon="calendar-outline" onPress={onBook} disabled={!selectedSpot} />
+      {selectedSpot ? (
+        <Modal animationType="fade" onRequestClose={() => onSelectSpot(null)} transparent visible={Boolean(selectedSpot)}>
+          <Pressable style={styles.bottomSheetBackdrop} onPress={() => onSelectSpot(null)}>
+            <Animated.View
+              {...sheetPanResponder.panHandlers}
+              style={[styles.bottomSheetPanel, styles.bookingSheetPanel, { transform: [{ translateY: sheetTranslateY }] }]}
+            >
+              <View style={styles.bottomSheetHandle} />
+              <View style={styles.timePanel}>
+                <View>
+                  <Text style={styles.panelKicker}>Время бронирования</Text>
+                  <Text style={styles.cardTitle}>{formatBookingDateTime(bookingTimeSlot.startTime)}</Text>
+                  <Text style={styles.mutedText}>до {formatBookingDateTime(bookingTimeSlot.endTime)}</Text>
+                </View>
+                <View style={styles.dateQuickRow}>
+                  <SecondaryButton label="Сегодня" icon="today-outline" onPress={() => onBookingTimeSlotChange(setBookingDate(bookingTimeSlot, formatDateInput(new Date())))} />
+                  <SecondaryButton label="+1 день" icon="chevron-forward-outline" onPress={() => onBookingTimeSlotChange(shiftBookingDay(bookingTimeSlot, 1))} />
+                </View>
+                <View style={styles.dateInputRow}>
+                  <Text style={styles.fieldLabel}>Дата</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setCalendarMonth(new Date(bookingTimeSlot.startTime));
+                      setCalendarVisible(true);
+                    }}
+                    style={[styles.input, styles.compactInput, styles.dateButton]}
+                  >
+                    <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+                    <Text style={styles.dateButtonText}>{formatDateInput(bookingTimeSlot.startTime)}</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.clockGrid}>
+                  <View style={styles.clockGroup}>
+                    <Text style={styles.fieldLabel}>Начало</Text>
+                    <View style={styles.clockInputs}>
+                      <TimePartInput max={23} value={bookingTimeSlot.startTime.getHours()} onCommit={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", String(hour), padClock(bookingTimeSlot.startTime.getMinutes())))} />
+                      <Text style={styles.clockSeparator}>:</Text>
+                      <TimePartInput max={59} value={bookingTimeSlot.startTime.getMinutes()} onCommit={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "start", padClock(bookingTimeSlot.startTime.getHours()), String(minute)))} />
+                    </View>
+                  </View>
+                  <View style={styles.clockGroup}>
+                    <Text style={styles.fieldLabel}>Окончание</Text>
+                    <View style={styles.clockInputs}>
+                      <TimePartInput max={23} value={bookingTimeSlot.endTime.getHours()} onCommit={(hour) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", String(hour), padClock(bookingTimeSlot.endTime.getMinutes())))} />
+                      <Text style={styles.clockSeparator}>:</Text>
+                      <TimePartInput max={59} value={bookingTimeSlot.endTime.getMinutes()} onCommit={(minute) => onBookingTimeSlotChange(setBookingClock(bookingTimeSlot, "end", padClock(bookingTimeSlot.endTime.getHours()), String(minute)))} />
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.bookingEstimate}>
+                  <Text style={styles.mutedText}>Место {selectedSpot.name ?? selectedSpot.spot_number} · {formatBookingDuration(bookingTimeSlot)}</Text>
+                  <Text style={styles.mutedText}>Расчет: {hourlyRate} ₽/час = {bookingCost} ₽</Text>
+                </View>
+                <PrimaryButton label="Забронировать" icon="calendar-outline" onPress={onBook} />
+              </View>
+            </Animated.View>
+          </Pressable>
+        </Modal>
+      ) : null}
     </ScrollView>
   );
 }
@@ -743,8 +901,54 @@ function BookingScreen({
   );
 }
 
-function VehicleScreen({ vehicles, onAddVehicle }: { vehicles: Vehicle[]; onAddVehicle: (plate: string) => void }) {
+function VehicleScreen({
+  vehicles,
+  onAddVehicle
+}: {
+  vehicles: Vehicle[];
+  onAddVehicle: (input: { numberPlate: string; brand?: string; color?: string; photos?: VehiclePhotos }) => void;
+}) {
   const [plate, setPlate] = useState("");
+  const [brand, setBrand] = useState("");
+  const [color, setColor] = useState("");
+  const [frontPhoto, setFrontPhoto] = useState("");
+  const [backPhoto, setBackPhoto] = useState("");
+  const [leftPhoto, setLeftPhoto] = useState("");
+  const [rightPhoto, setRightPhoto] = useState("");
+
+  const photoSetters: Record<keyof VehiclePhotos, (value: string) => void> = {
+    front: setFrontPhoto,
+    back: setBackPhoto,
+    left: setLeftPhoto,
+    right: setRightPhoto
+  };
+
+  async function selectPhoto(side: keyof VehiclePhotos, source: "camera" | "library") {
+    const permission =
+      source === "camera"
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Нет доступа", source === "camera" ? "Разрешите доступ к камере." : "Разрешите доступ к галерее.");
+      return;
+    }
+
+    const result =
+      source === "camera"
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+
+    if (!result.canceled && result.assets[0]?.uri) {
+      photoSetters[side](result.assets[0].uri);
+    }
+  }
+
+  const photos: VehiclePhotos = {
+    front: frontPhoto,
+    back: backPhoto,
+    left: leftPhoto,
+    right: rightPhoto
+  };
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
@@ -762,12 +966,51 @@ function VehicleScreen({ vehicles, onAddVehicle }: { vehicles: Vehicle[]; onAddV
       <View style={styles.formBlock}>
         <Text style={styles.sectionTitle}>Добавить автомобиль</Text>
         <TextInput autoCapitalize="characters" onChangeText={setPlate} placeholder="А123ВС124" style={styles.input} value={plate} />
+        <TextInput onChangeText={setBrand} placeholder="Марка авто" style={styles.input} value={brand} />
+        <TextInput onChangeText={setColor} placeholder="Цвет авто" style={styles.input} value={color} />
+        <View style={styles.photoGrid}>
+          {([
+            ["front", "Спереди"],
+            ["back", "Сзади"],
+            ["left", "Слева"],
+            ["right", "Справа"]
+          ] as Array<[keyof VehiclePhotos, string]>).map(([side, label]) => (
+            <View key={side} style={styles.photoSlot}>
+              {photos[side] ? <Image source={{ uri: photos[side] }} style={styles.photoPreview} /> : <Ionicons name="image-outline" size={30} color={colors.muted} />}
+              <Text style={styles.fieldLabel}>{label}</Text>
+              <View style={styles.photoActions}>
+                <Pressable style={styles.iconButton} onPress={() => selectPhoto(side, "library")}>
+                  <Ionicons name="images-outline" size={18} color={colors.primary} />
+                </Pressable>
+                <Pressable style={styles.iconButton} onPress={() => selectPhoto(side, "camera")}>
+                  <Ionicons name="camera-outline" size={18} color={colors.primary} />
+                </Pressable>
+              </View>
+            </View>
+          ))}
+        </View>
         <PrimaryButton
           label="Сохранить автомобиль"
           icon="add-circle-outline"
           onPress={() => {
-            onAddVehicle(plate);
+            onAddVehicle({
+              numberPlate: plate,
+              brand,
+              color,
+              photos: {
+                front: frontPhoto,
+                back: backPhoto,
+                left: leftPhoto,
+                right: rightPhoto
+              }
+            });
             setPlate("");
+            setBrand("");
+            setColor("");
+            setFrontPhoto("");
+            setBackPhoto("");
+            setLeftPhoto("");
+            setRightPhoto("");
           }}
         />
       </View>
@@ -776,13 +1019,31 @@ function VehicleScreen({ vehicles, onAddVehicle }: { vehicles: Vehicle[]; onAddV
 }
 
 function OwnerScreen({
+  availableSpots,
   spots,
+  reports,
+  onLoadReport,
+  onRegisterSpot,
+  onSavePrice,
   onToggleSpot
 }: {
+  availableSpots: ParkingSpot[];
   spots: ParkingSpot[];
+  reports: Record<number, OwnerSpotReport>;
+  onLoadReport: (spot: ParkingSpot) => void;
+  onRegisterSpot: (spotId: number, hourlyRate: number, penalty: number) => void;
+  onSavePrice: (spot: ParkingSpot, hourlyRate: number, penalty: number) => void;
   onToggleSpot: (spot: ParkingSpot) => void;
 }) {
-  const income = useMemo(() => spots.filter((spot) => spot.status !== 1).length * 240, [spots]);
+  const [spotIdDraft, setSpotIdDraft] = useState("");
+  const [priceDraft, setPriceDraft] = useState("120");
+  const [penaltyDraft, setPenaltyDraft] = useState("500");
+  const [ownershipMapVisible, setOwnershipMapVisible] = useState(false);
+  const [selectedOwnershipSpot, setSelectedOwnershipSpot] = useState<ParkingSpot | null>(null);
+  const income = useMemo(
+    () => Object.values(reports).reduce((sum, report) => sum + report.transfer_amount, 0),
+    [reports]
+  );
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
@@ -804,7 +1065,53 @@ function OwnerScreen({
       </View>
 
       <Text style={styles.sectionTitle}>Управление местами</Text>
-      {spots.slice(0, 8).map((spot) => (
+      <View style={styles.formBlock}>
+        <Text style={styles.sectionTitle}>Зарегистрировать место</Text>
+        <SecondaryButton label={selectedOwnershipSpot ? `Место ${selectedOwnershipSpot.name ?? selectedOwnershipSpot.spot_number}` : "Добавить собственное место"} icon="map-outline" onPress={() => setOwnershipMapVisible(true)} />
+        <TextInput keyboardType="number-pad" onChangeText={setPriceDraft} placeholder="Цена за час" style={styles.input} value={priceDraft} />
+        <TextInput keyboardType="number-pad" onChangeText={setPenaltyDraft} placeholder="Штраф" style={styles.input} value={penaltyDraft} />
+        <PrimaryButton
+          label="Закрепить за мной"
+          icon="key-outline"
+          onPress={() => onRegisterSpot(selectedOwnershipSpot?.id ?? Number(spotIdDraft), Number(priceDraft) || 0, Number(penaltyDraft) || 0)}
+        />
+      </View>
+
+      <Modal animationType="slide" onRequestClose={() => setOwnershipMapVisible(false)} transparent visible={ownershipMapVisible}>
+        <Pressable style={styles.bottomSheetBackdrop} onPress={() => setOwnershipMapVisible(false)}>
+          <Pressable style={styles.ownerMapPanel}>
+            <View style={styles.bottomSheetHandle} />
+            <Text style={styles.sectionTitle}>Выберите место на карте</Text>
+            <View style={styles.mapGrid}>
+              {availableSpots.map((spot) => {
+                const isOwned = spots.some((ownerSpot) => ownerSpot.id === spot.id);
+                const isSelected = selectedOwnershipSpot?.id === spot.id;
+                return (
+                  <Pressable
+                    key={`owner-map-${spot.id}`}
+                    disabled={isOwned}
+                    onPress={() => {
+                      setSelectedOwnershipSpot(spot);
+                      setSpotIdDraft(String(spot.id));
+                      setOwnershipMapVisible(false);
+                    }}
+                    style={[
+                      styles.spot,
+                      isOwned && styles.spotBusy,
+                      isSelected && styles.spotSelected,
+                      spot.for_disabled && styles.spotSpecial
+                    ]}
+                  >
+                    <Text style={[styles.spotText, isOwned && styles.spotTextMuted]}>{spot.name ?? spot.spot_number}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {spots.map((spot) => (
         <View key={spot.id} style={styles.ownerRow}>
           <View>
             <Text style={styles.cardTitle}>Место {spot.name ?? spot.spot_number}</Text>
@@ -820,6 +1127,25 @@ function OwnerScreen({
           </Pressable>
         </View>
       ))}
+      {spots.length ? (
+        <View style={styles.formBlock}>
+          <Text style={styles.sectionTitle}>Отчетность</Text>
+          {spots.map((spot) => (
+            <View key={`report-${spot.id}`} style={styles.detailPanel}>
+              <Text style={styles.cardTitle}>Место {spot.name ?? spot.spot_number}</Text>
+              <Text style={styles.mutedText}>
+                {reports[spot.id] ? `${reports[spot.id].transfer_count} переводов · ${reports[spot.id].transfer_amount} ₽` : "Отчет еще не загружен"}
+              </Text>
+              <SecondaryButton label="Загрузить отчет" icon="document-text-outline" onPress={() => onLoadReport(spot)} />
+              <SecondaryButton
+                label="Сохранить цену"
+                icon="save-outline"
+                onPress={() => onSavePrice(spot, Number(priceDraft) || (spot.hourly_rate ?? 120), Number(penaltyDraft) || (spot.penalty ?? 500))}
+              />
+            </View>
+          ))}
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -1364,6 +1690,36 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: spacing.lg
   },
+  bottomSheetBackdrop: {
+    backgroundColor: "rgba(15, 23, 42, 0.36)",
+    flex: 1,
+    justifyContent: "flex-end"
+  },
+  bottomSheetPanel: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: "86%",
+    padding: spacing.lg
+  },
+  bookingSheetPanel: {
+    marginBottom: 74
+  },
+  ownerMapPanel: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: "78%",
+    padding: spacing.lg
+  },
+  bottomSheetHandle: {
+    alignSelf: "center",
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    height: 4,
+    marginBottom: spacing.md,
+    width: 46
+  },
   calendarPanel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -1612,6 +1968,30 @@ const styles = StyleSheet.create({
   listText: {
     flex: 1
   },
+  photoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
+  },
+  photoSlot: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: spacing.xs,
+    padding: spacing.sm,
+    width: "48%"
+  },
+  photoPreview: {
+    aspectRatio: 1.4,
+    borderRadius: 6,
+    width: "100%"
+  },
+  photoActions: {
+    flexDirection: "row",
+    gap: spacing.sm
+  },
   formBlock: {
     marginTop: spacing.lg
   },
@@ -1718,3 +2098,4 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   }
 });
+

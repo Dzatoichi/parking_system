@@ -64,6 +64,7 @@ vite.svg
 *.gz
 *.rar
 *.7z
+*.docx
 
 # Project-specific local assets
 _other/

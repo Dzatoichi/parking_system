@@ -177,14 +177,14 @@ class CameraProcessor:
             cars_3d, departed, new_tracks = self._process_frame(frame, timestamp)
 
             # Отправляем результаты в монитор
-            if self.outgoing_queue and (cars_3d or departed or new_tracks):
+            if self.outgoing_queue:
                 msg = ProcessorMessage(
                     camera_id=self.camera_id,
                     frame_number=self.processed_count,
                     timestamp=timestamp,
                     cars_3d=cars_3d,
                     departed=departed,
-                    new_tracks=new_tracks
+                    new_tracks=new_tracks,
                 )
                 self.outgoing_queue.put(msg)
 

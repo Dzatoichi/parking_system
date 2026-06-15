@@ -66,6 +66,21 @@ class SpotStatusUpdate(BaseSchema):
         return self
 
 
+class SpotOwnershipRegister(BaseSchema):
+    parking_id: int | None = Field(default=None, gt=0)
+    spot_number: str | None = Field(default=None, min_length=1, max_length=10)
+    hourly_rate: float = Field(default=100, ge=0)
+    penalty: float = Field(default=0, ge=0)
+    rental_enabled: bool = False
+
+
+class SpotRentalUpdate(BaseSchema):
+    hourly_rate: float | None = Field(default=None, ge=0)
+    penalty: float | None = Field(default=None, ge=0)
+    rental_enabled: bool | None = None
+    status: SpotStatus | None = None
+
+
 class SpotCoordinatesUpdate(BaseSchema):
     """
     Обновление разметки места (после перемаркировки).
@@ -85,6 +100,10 @@ class SpotRead(BaseSchema):
     spot_coordinates: SpotCoordinates
     parking_id: int
     current_vehicle_id: Optional[int] = None
+    owner_id: Optional[int] = None
+    rental_enabled: bool = False
+    hourly_rate: float = 100
+    penalty: float = 0
 
 
 class SpotReadShort(BaseSchema):
@@ -98,3 +117,7 @@ class SpotReadShort(BaseSchema):
     spot_type: SpotType
     spot_status: SpotStatus
     current_vehicle_id: Optional[int] = None
+    owner_id: Optional[int] = None
+    rental_enabled: bool = False
+    hourly_rate: float = 100
+    penalty: float = 0

@@ -92,6 +92,48 @@ class SpotDAO(BaseDAO[Spot]):
             return res.scalar_one_or_none()
 
     @BaseDAO.with_exception
+    async def get_by_owner(self, owner_id: int) -> list[Spot]:
+        async with self._get_session() as session:
+            stmt = (
+                select(self.model)
+                .where(self.model.owner_id == owner_id)
+                .order_by(self.model.parking_id, self.model.spot_number)
+            )
+            res = await session.execute(stmt)
+            return list(res.scalars().all())
+
+    @BaseDAO.with_exception
+    async def update_rental_settings(
+        self,
+        spot_id: int,
+        *,
+        hourly_rate: float | None = None,
+        penalty: float | None = None,
+        rental_enabled: bool | None = None,
+        owner_id: int | None = None,
+        spot_status: SpotStatus | None = None,
+    ) -> Optional[Spot]:
+        values = {
+            key: value
+            for key, value in {
+                "hourly_rate": hourly_rate,
+                "penalty": penalty,
+                "rental_enabled": rental_enabled,
+                "owner_id": owner_id,
+                "spot_status": spot_status,
+            }.items()
+            if value is not None
+        }
+        async with self._get_session() as session:
+            stmt = update(self.model).where(self.model.id == spot_id).values(**values).returning(self.model)
+            res = await session.execute(stmt)
+            await session.commit()
+            updated = res.scalar_one_or_none()
+            if updated:
+                await session.refresh(updated)
+            return updated
+
+    @BaseDAO.with_exception
     async def get_stats(self, parking_id: int) -> dict[str, int]:
         """
         Считает количество мест по каждому статусу одним запросом.

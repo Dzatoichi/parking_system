@@ -9,7 +9,7 @@ ENV_FILE = BASE_DIR / ".env"
 
 class Settings(BaseSettings):
     """
-    РљР»Р°СЃСЃ РєРѕРЅС„РёРіР° РґР»СЏ СЂР°Р±РѕС‚С‹ СЃ Р‘Р”.
+    Класс конфига для работы с БД.
     """
 
     DATABASE_URL: str | None = None
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     def CONNECT_ASYNC(self) -> str:
         """
-        Р¤СѓРЅРєС†РёСЏ СЃРѕР·РґР°РЅРёСЏ СЃРѕРµРґРёРЅРµРЅРёСЏ СЃ Р‘Р”.
+        Функция создания соединения с БД.
         """
         if self.DATABASE_URL:
             return self.DATABASE_URL

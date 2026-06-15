@@ -108,6 +108,27 @@ class BookingDAO(BaseDAO[Booking]):
             return list(res.scalars().all())
 
     @BaseDAO.with_exception
+    async def get_by_spot(
+        self,
+        spot_id: int,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[Booking], int]:
+        async with self._get_session() as session:
+            query = (
+                select(self.model)
+                .options(selectinload(self.model.spot), selectinload(self.model.vehicle))
+                .where(self.model.spot_id == spot_id)
+                .order_by(self.model.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            count_query = select(func.count(self.model.id)).where(self.model.spot_id == spot_id)
+            rows = await session.execute(query)
+            total = await session.execute(count_query)
+            return list(rows.scalars().all()), total.scalar_one()
+
+    @BaseDAO.with_exception
     async def get_all_with_spot(self) -> list[Booking]:
         async with self._get_session() as session:
             rows = await session.execute(

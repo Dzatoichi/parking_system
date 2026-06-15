@@ -136,7 +136,7 @@ function CamerasDashboard() {
         </p>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+      {/* <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm text-gray-500">CV мониторинг</p>
@@ -187,7 +187,7 @@ function CamerasDashboard() {
             {monitorErrorText}
           </div>
         )}
-      </div>
+      </div> */}
 
       {parkings.length === 0 ? (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start space-x-3">

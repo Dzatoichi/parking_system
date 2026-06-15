@@ -1,12 +1,14 @@
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 
 from src.models.status.spot_status import SpotStatus
 from src.models.type.spot_type import SpotType
 from src.schemas.spot_schemas import (
     SpotCreate,
+    SpotOwnershipRegister,
+    SpotRentalUpdate,
     SpotRead,
     SpotReadShort,
     SpotStatusUpdate,
@@ -14,9 +16,109 @@ from src.schemas.spot_schemas import (
 )
 from src.schemas.parking_schemas import ParkingStats
 from src.schemas.common import PaginatedResponse
-from src.utils.dependencies import SpotServiceDep
+from src.models.status.booking_status import BookingStatus
+from src.utils.dependencies import BookingServiceDep, SpotServiceDep, get_current_user_id
 
 spot_router = APIRouter(prefix="/spots", tags=["spots"])
+
+
+def _booking_amount(booking, hourly_rate: float) -> float:
+    seconds = max(0.0, (booking.end_time - booking.start_time).total_seconds())
+    return round((hourly_rate * seconds) / 3600, 2)
+
+
+@spot_router.get(
+    "/me",
+    response_model=list[SpotRead],
+    summary="Места в собственности текущего пользователя",
+)
+async def get_my_spots(
+    service: SpotServiceDep,
+    user_id: int = Depends(get_current_user_id),
+) -> list[SpotRead]:
+    return await service.get_owner_spots(user_id)
+
+
+@spot_router.patch(
+    "/{spot_id}/ownership",
+    response_model=SpotRead,
+    summary="Зарегистрировать место в собственность текущего пользователя",
+)
+async def register_spot_ownership(
+    spot_id: int,
+    body: SpotOwnershipRegister,
+    service: SpotServiceDep,
+    user_id: int = Depends(get_current_user_id),
+) -> SpotRead:
+    return await service.register_ownership(spot_id, user_id, body)
+
+
+@spot_router.patch(
+    "/{spot_id}/rental",
+    response_model=SpotRead,
+    summary="Обновить цену и доступность места для аренды",
+)
+async def update_spot_rental(
+    spot_id: int,
+    body: SpotRentalUpdate,
+    service: SpotServiceDep,
+    user_id: int = Depends(get_current_user_id),
+) -> SpotRead:
+    return await service.update_rental_settings(spot_id, user_id, body)
+
+
+@spot_router.get(
+    "/{spot_id}/rental-report",
+    summary="Отчетность по месту в собственности",
+)
+async def get_spot_rental_report(
+    spot_id: int,
+    spot_service: SpotServiceDep,
+    booking_service: BookingServiceDep,
+    user_id: int = Depends(get_current_user_id),
+) -> dict:
+    spot = await spot_service.get_spot_by_id(spot_id)
+    if spot.owner_id != user_id:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Можно смотреть отчет только по своим местам")
+
+    bookings = await booking_service.get_spot_bookings(spot_id=spot_id, page=1, size=100)
+    paid_statuses = {BookingStatus.CONFIRMED, BookingStatus.COMPLETED}
+    report_items = []
+    transfer_count = 0
+    transfer_amount = 0.0
+    for booking in bookings.items:
+        amount = _booking_amount(booking, spot.hourly_rate)
+        paid = booking.status in paid_statuses
+        if paid:
+            transfer_count += 1
+            transfer_amount += amount
+        report_items.append(
+            {
+                "booking_id": booking.id,
+                "user_id": booking.user_id,
+                "user_name": booking.user_name,
+                "vehicle_id": booking.vehicle_id,
+                "vehicle_plate_number": booking.vehicle_plate_number,
+                "status": booking.status.value,
+                "start_time": booking.start_time.isoformat(),
+                "end_time": booking.end_time.isoformat(),
+                "created_at": booking.created_at.isoformat(),
+                "updated_at": booking.updated_at.isoformat(),
+                "hourly_rate": spot.hourly_rate,
+                "amount": amount,
+                "transfer_status": "succeeded" if paid else "pending",
+            }
+        )
+
+    return {
+        "spot": spot.model_dump(mode="json"),
+        "bookings": report_items,
+        "transfer_count": transfer_count,
+        "transfer_amount": round(transfer_amount, 2),
+        "currency": "RUB",
+    }
 
 
 @spot_router.get(

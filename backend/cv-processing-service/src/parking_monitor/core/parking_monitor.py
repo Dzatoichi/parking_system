@@ -208,36 +208,36 @@ class ParkingMonitor:
                 print(f"Error in message loop: {e}")
                 # traceback.print_exc()
 
-    def _handle_message(self, msg: ProcessorMessage):
-        """
-        Обрабатывает сообщение от CameraProcessor.
-        """
-        # Обновляем статистику
-        self.stats['total_frames_processed'] += 1
-        self.stats['total_cars_detected'] += len(msg.cars_3d)
+    # def _handle_message(self, msg: ProcessorMessage):
+    #     """
+    #     Обрабатывает сообщение от CameraProcessor.
+    #     """
+    #     # Обновляем статистику
+    #     self.stats['total_frames_processed'] += 1
+    #     self.stats['total_cars_detected'] += len(msg.cars_3d)
 
-        # 1. Обновляем реестр автомобилей
-        for car in msg.cars_3d:
-            self.vehicle_registry.update_vehicle(
-                track_id=car.track_id,
-                camera_id=msg.camera_id,
-                position=car.center,
-                container_id=car.container_id,
-                direction=car.direction,
-                timestamp=msg.timestamp,
-                frame=msg.frame_number
-            )
+    #     # 1. Обновляем реестр автомобилей
+    #     for car in msg.cars_3d:
+    #         self.vehicle_registry.update_vehicle(
+    #             track_id=car.track_id,
+    #             camera_id=msg.camera_id,
+    #             position=car.center,
+    #             container_id=car.container_id,
+    #             direction=car.direction,
+    #             timestamp=msg.timestamp,
+    #             frame=msg.frame_number
+    #         )
 
-            # Обновляем состояние места
-            if car.container_id != -1:
-                self.spot_manager.update_from_detection(
-                    car.container_id, car.track_id, msg.timestamp
-                )
-            self._update_absent_spots(set(car.container_id for car in msg.cars_3d), msg.timestamp)
+    #         # Обновляем состояние места
+    #         if car.container_id != -1:
+    #             self.spot_manager.update_from_detection(
+    #                 car.container_id, car.track_id, msg.timestamp
+    #             )
+    #         self._update_absent_spots(set(car.container_id for car in msg.cars_3d), msg.timestamp)
 
-            # Если инициализационный режим и время вышло – завершить инициализацию
-            if self.initialization_mode and time.time() > self.init_end_time:
-                self._finalize_initialization()
+    #         # Если инициализационный режим и время вышло – завершить инициализацию
+    #         if self.initialization_mode and time.time() > self.init_end_time:
+    #             self._finalize_initialization()
 
         # 2. Обрабатываем новые треки (нужна реидентификация)
         # for track_id, features in msg.new_tracks:
@@ -248,8 +248,58 @@ class ParkingMonitor:
         #     self._handle_vehicle_departed(track_id, msg.camera_id, segment, msg.timestamp)
 
         # Обновляем статистику для отладки
-        self.stats['active_vehicles'] = len(self.vehicle_registry.active_vehicles)
-        self.stats['parked_vehicles'] = len(self.vehicle_registry.parked_vehicles)
+        # self.stats['active_vehicles'] = len(self.vehicle_registry.active_vehicles)
+        # self.stats['parked_vehicles'] = len(self.vehicle_registry.parked_vehicles)
+
+    def _handle_message(self, msg: ProcessorMessage):
+        """
+        Обрабатывает сообщение от CameraProcessor.
+        """
+        # Обновляем статистику
+        self.stats["total_frames_processed"] += 1
+        self.stats["total_cars_detected"] += len(msg.cars_3d)
+
+        occupied_spots = {
+            car.container_id
+            for car in msg.cars_3d
+            if car.container_id != -1
+        }
+
+        for car in msg.cars_3d:
+            self.vehicle_registry.update_vehicle(
+                track_id=car.track_id,
+                camera_id=msg.camera_id,
+                position=car.center,
+                container_id=car.container_id,
+                direction=car.direction,
+                timestamp=msg.timestamp,
+                frame=msg.frame_number,
+            )
+
+            if car.container_id != -1:
+                self.spot_manager.update_from_detection(
+                    spot_id=car.container_id,
+                    track_id=car.track_id,
+                    timestamp=msg.timestamp,
+                )
+
+        # Вызывается один раз на кадр и только для мест данной камеры
+        self._update_absent_spots(
+            camera_id=msg.camera_id,
+            occupied_set=occupied_spots,
+            timestamp=msg.timestamp,
+        )
+
+        # Проверка должна выполняться даже при отсутствии автомобилей
+        if self.initialization_mode and time.time() > self.init_end_time:
+            self._finalize_initialization()
+
+        self.stats["active_vehicles"] = len(
+            self.vehicle_registry.active_vehicles
+        )
+        self.stats["parked_vehicles"] = len(
+            self.vehicle_registry.parked_vehicles
+        )
 
     def _finalize_initialization(self):
         """Финализирует инициализацию: подтверждает/освобождает места согласно накопленным данным"""
@@ -267,12 +317,32 @@ class ParkingMonitor:
                 pass
         print("Initialization completed, parking spots verified")
 
-    def _update_absent_spots(self, occupied_set: set, timestamp: float):
-        """Для всех мест, которые не были заняты в этом кадре, вызываем update_from_absence"""
+    def _update_absent_spots(
+        self,
+        camera_id: int,
+        occupied_set: set[int],
+        timestamp: float,
+    ):
+        """Обновляет отсутствие только для мест указанной камеры."""
+
+        scene = self.scenes.get(camera_id)
+        if scene is None:
+            return
+
+        camera_spot_ids = set(scene.containers.keys())
+
         with self.spot_manager.lock:
-            for spot_id, state in self.spot_manager.spots.items():
+            for spot_id in camera_spot_ids:
+                state = self.spot_manager.spots.get(spot_id)
+
+                if state is None:
+                    continue
+
                 if spot_id not in occupied_set and state.status != SpotStatus.FREE:
-                    self.spot_manager.update_from_absence(spot_id, timestamp)
+                    self.spot_manager.update_from_absence(
+                        spot_id=spot_id,
+                        timestamp=timestamp,
+                    )
 
     # def _handle_new_track(self, track_id, features, camera_id, timestamp, frame):
     #     """

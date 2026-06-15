@@ -28,6 +28,9 @@ const SPOT_FILL: Record<SpotStatus, string> = {
   reserved: "#fef08a",
 };
 
+const DISABLED_SPOT_FILL = "#dbeafe";
+const DISABLED_SPOT_STROKE = "#2563eb";
+
 const SPOT_STROKE: Record<SpotStatus, string> = {
   free: "#16a34a",
   occupied: "#dc2626",
@@ -218,8 +221,8 @@ export function ParkingMap() {
                   if (!coords?.points?.length) return null;
 
                   const isDisabled = spot.spot_type === "disabled";
-                  const fill = SPOT_FILL[spot.spot_status] ?? "#e5e7eb";
-                  const stroke = isDisabled ? "#2563eb" : (SPOT_STROKE[spot.spot_status] ?? "#9ca3af");
+                  const fill = isDisabled ? DISABLED_SPOT_FILL : (SPOT_FILL[spot.spot_status] ?? "#e5e7eb");
+                  const stroke = isDisabled ? DISABLED_SPOT_STROKE : (SPOT_STROKE[spot.spot_status] ?? "#9ca3af");
                   const isSelected = selectedSpot?.id === spot.id;
 
                   return (
@@ -258,6 +261,20 @@ export function ParkingMap() {
                       >
                         {STATUS_LABELS[spot.spot_status]}
                       </text>
+                      {isDisabled && (
+                        <text
+                          x={coords.center_x + 34}
+                          y={coords.center_y - 30}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={22}
+                          fontWeight={800}
+                          fill={DISABLED_SPOT_STROKE}
+                          pointerEvents="none"
+                        >
+                          ♿
+                        </text>
+                      )}
                     </g>
                   );
                 })}
@@ -331,6 +348,9 @@ export function ParkingMap() {
                   <span className="flex items-center gap-2">
                     <MapPin className="w-4 h-4 text-gray-400" />
                     <span className="text-sm font-medium text-gray-900">{spot.spot_number}</span>
+                    {spot.spot_type === "disabled" && (
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">♿</span>
+                    )}
                   </span>
                   <span className={`text-xs font-medium ${
                     spot.spot_status === "occupied"

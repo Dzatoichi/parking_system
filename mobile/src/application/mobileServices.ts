@@ -8,11 +8,14 @@ export {
   getActiveBooking,
   getApiBaseUrl,
   getErrorMessage,
+  getOwnerSpotReport,
+  getOwnerSpots,
   getParkings,
   getSpots,
   getVehicles,
   isUnauthorizedError,
   login,
+  registerOwnerSpot,
   register,
   updateOwnerSpot
 } from "../data/api/mobileApi";

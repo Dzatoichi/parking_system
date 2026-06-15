@@ -12,6 +12,8 @@ from src.schemas import (
     SpotCreate,
     SpotRead,
     SpotReadShort,
+    SpotOwnershipRegister,
+    SpotRentalUpdate,
     SpotStatusUpdate,
     SpotCoordinatesUpdate,
     PaginatedResponse,
@@ -67,6 +69,69 @@ class SpotService:
         )
         items = [SpotRead.model_validate(s) for s in spots]
         return PaginatedResponse.create(items=items, total=total, page=page, size=size)
+
+    async def get_owner_spots(self, owner_id: int) -> list[SpotRead]:
+        spots = await self._dao.get_by_owner(owner_id)
+        return [SpotRead.model_validate(spot) for spot in spots]
+
+    async def register_ownership(
+        self,
+        spot_id: int,
+        owner_id: int,
+        data: SpotOwnershipRegister,
+    ) -> SpotRead:
+        spot = await self._dao.get_by_id(spot_id)
+        if spot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Место с id={spot_id} не найдено",
+            )
+        if spot.owner_id is not None and spot.owner_id != owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Место уже зарегистрировано на другого пользователя",
+            )
+
+        updated = await self._dao.update_rental_settings(
+            spot_id,
+            owner_id=owner_id,
+            hourly_rate=data.hourly_rate,
+            penalty=data.penalty,
+            rental_enabled=data.rental_enabled,
+            spot_status=SpotStatus.FREE if data.rental_enabled else SpotStatus.RESERVED,
+        )
+        return SpotRead.model_validate(updated)
+
+    async def update_rental_settings(
+        self,
+        spot_id: int,
+        owner_id: int,
+        data: SpotRentalUpdate,
+    ) -> SpotRead:
+        spot = await self._dao.get_by_id(spot_id)
+        if spot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Место с id={spot_id} не найдено",
+            )
+        if spot.owner_id != owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Можно управлять только своими местами",
+            )
+
+        new_status = data.status
+        if new_status is None and data.rental_enabled is not None:
+            new_status = SpotStatus.FREE if data.rental_enabled else SpotStatus.RESERVED
+
+        updated = await self._dao.update_rental_settings(
+            spot_id,
+            hourly_rate=data.hourly_rate,
+            penalty=data.penalty,
+            rental_enabled=data.rental_enabled,
+            spot_status=new_status,
+        )
+        return SpotRead.model_validate(updated)
 
     async def get_parking_stats(self, parking_id: int) -> ParkingStats:
         stats = await self._dao.get_stats(parking_id)

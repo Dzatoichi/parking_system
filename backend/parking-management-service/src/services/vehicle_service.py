@@ -87,6 +87,9 @@ class VehicleService:
             "plate_number": data.plate_number,
             "owner_id": owner_id,
             "is_inside": False,
+            "brand": getattr(data, "brand", None),
+            "color": getattr(data, "color", None),
+            "photo_urls": getattr(data, "photo_urls", None) or getattr(data, "photos", None),
         }
         vehicle = await self._dao.create(vehicle_dict)
         return self._to_read(vehicle)
@@ -242,6 +245,9 @@ class VehicleService:
             is_blocked=bool(getattr(vehicle, "is_blocked", False) or False),
             last_seen=vehicle.last_seen,
             last_camera_id=vehicle.last_camera_id,
+            brand=getattr(vehicle, "brand", None),
+            color=getattr(vehicle, "color", None),
+            photo_urls=getattr(vehicle, "photo_urls", None),
         )
 
     @staticmethod

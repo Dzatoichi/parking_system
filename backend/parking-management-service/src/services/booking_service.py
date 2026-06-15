@@ -151,6 +151,26 @@ class BookingService:
             size=size,
         )
 
+    async def get_spot_bookings(
+        self,
+        spot_id: int,
+        page: int = 1,
+        size: int = 50,
+    ) -> BookingListResponse:
+        offset = (max(page, 1) - 1) * size
+        bookings, total = await self._booking_dao.get_by_spot(
+            spot_id=spot_id,
+            offset=offset,
+            limit=size,
+        )
+        projections = await self._projection_dao.get_by_booking_ids([booking.id for booking in bookings])
+        return BookingListResponse.create(
+            items=[self._booking_to_read(booking, projections.get(booking.id)) for booking in bookings],
+            total=total,
+            page=page,
+            size=size,
+        )
+
     async def get_available_spots(
         self,
         parking_id: int,
@@ -160,6 +180,8 @@ class BookingService:
         available_spots: list[AvailableSpotInfo] = []
         for spot in spots:
             if spot.spot_status == SpotStatus.OCCUPIED:
+                continue
+            if spot.owner_id is not None and not spot.rental_enabled:
                 continue
 
             available_spots.append(

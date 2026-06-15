@@ -8,6 +8,8 @@ from .parking_schemas import ParkingCreate, ParkingUpdate, ParkingRead, ParkingS
 from .spot_schemas import (
     SpotCoordinates,
     SpotCreate,
+    SpotOwnershipRegister,
+    SpotRentalUpdate,
     SpotStatusUpdate,
     SpotCoordinatesUpdate,
     SpotRead,
@@ -49,6 +51,7 @@ __all__ = [
     "PaginatedResponse", "ErrorResponse", "SuccessResponse",
     "ParkingCreate", "ParkingUpdate", "ParkingRead", "ParkingStats",
     "SpotCoordinates", "SpotCreate", "SpotStatusUpdate", "SpotCoordinatesUpdate",
+    "SpotOwnershipRegister", "SpotRentalUpdate",
     "SpotRead", "SpotReadShort",
     "CameraCreate", "CameraUpdate", "CameraRead", "CameraNetworkRead",
     "BookingCreate", "BookingUpdate", "BookingRead",

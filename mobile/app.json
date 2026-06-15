@@ -19,7 +19,8 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0F172A"
-      }
+      },
+      "package": "com.anonymous.smartparkingmobile"
     },
     "web": {
       "bundler": "metro"
@@ -29,7 +30,14 @@
       "apiPort": "8080"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Приложению нужен доступ к галерее, чтобы добавить фото автомобиля.",
+          "cameraPermission": "Приложению нужен доступ к камере, чтобы сфотографировать автомобиль."
+        }
+      ]
     ]
   }
 }

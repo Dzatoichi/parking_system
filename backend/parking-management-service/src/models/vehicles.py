@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 
 from src.database.base import Base
-from sqlalchemy import Integer, String, ForeignKey, Boolean
+from sqlalchemy import Integer, String, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import mapped_column, Mapped, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -28,6 +28,9 @@ class Vehicles(Base):
     )
     # ID владельца
     owner_id: Mapped[int] = mapped_column( Integer, nullable=False, index=True)
+    brand: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    photo_urls: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Текущее парковочное место (если есть)
     current_spot: Mapped[Optional["Spot"]] = relationship(

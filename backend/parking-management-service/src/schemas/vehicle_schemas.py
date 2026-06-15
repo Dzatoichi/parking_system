@@ -45,6 +45,9 @@ class VehicleCreate(BaseSchema):
         description="Номерной знак в верхнем регистре",
         examples=["А123ВС77", "B456CD"],
     )
+    brand: str | None = Field(default=None, max_length=80)
+    color: str | None = Field(default=None, max_length=40)
+    photo_urls: dict[str, str] | None = None
 
     @field_validator("plate_number")
     @classmethod
@@ -55,6 +58,7 @@ class MobileVehicleCreate(VehicleCreate):
     name: str | None = None
     brand_id: int | None = None
     body_type_id: int | None = None
+    photos: dict[str, str] | None = None
 
 
 class VehicleRead(BaseSchema):
@@ -68,6 +72,9 @@ class VehicleRead(BaseSchema):
     is_blocked: bool
     last_seen: Optional[datetime]
     last_camera_id: Optional[int]
+    brand: Optional[str] = None
+    color: Optional[str] = None
+    photo_urls: dict[str, str] | None = None
 
 
 class VehicleBlockUpdate(BaseSchema):
