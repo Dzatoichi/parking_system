@@ -27,6 +27,7 @@ from FeatureZoneModule import EntrySessionManager, FeatureZoneManager
 from PlateOCRModule import PlateOCRTracker
 from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
+from TriggerModule.TriggerProcess import TriggerProcess
 
 
 ROOT = Path(__file__).resolve().parent
@@ -226,11 +227,17 @@ def main() -> None:
                         camera_id, frame_id, frame, tracks
                     )
                     if camera_id == 1:
-                        active_camera1 = sorted(
-                            tid for cam, tid in feature_managers[1].active_track_keys() if cam == 1
-                        )
-                        for tid in active_camera1:
-                            start_registration(tid, frame_id)
+                        # Reuse the existing TriggerProcess predicate, but apply it
+                        # to this controller-owned stream/tracker (no duplicate capture).
+                        for box, tid in zip(boxes, ids):
+                            key = (1, int(tid))
+                            if key in registered_tracks:
+                                continue
+                            if (
+                                TriggerProcess.bbox_center_in_roi(box, (1280, 720))
+                                and TriggerProcess.is_triggered_bbox(box)
+                            ):
+                                start_registration(int(tid), frame_id)
 
                     active_ids = {
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
