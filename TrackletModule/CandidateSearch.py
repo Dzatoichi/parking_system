@@ -1,7 +1,7 @@
 """Candidate-search orchestration over the existing camera-transition algorithm.
 
-A search belongs to a globally registered vehicle_id. Camera-local track IDs are
-only observation references and are never used as vehicle identity.
+A search can follow either a registered global vehicle or an unresolved journey.
+Camera-local track IDs are observation references, never global vehicle identity.
 """
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
@@ -17,14 +17,19 @@ from TopologyModule.TransitionTracker import (
 
 @dataclass(frozen=True)
 class SearchTask:
-    """Find a registered vehicle after a confirmed camera transition."""
+    """A search journey; vehicle_id is absent until identity is established."""
 
-    vehicle_id: int
+    task_id: str
+    vehicle_id: Optional[int]
     source_camera: int
     target_camera: int
     exit_frame_id: int
-    # Diagnostic reference only; never the identity of the search.
+    # Diagnostic observation reference, not the identity of the task.
     source_track_id: int
+
+    @property
+    def is_registered(self) -> bool:
+        return self.vehicle_id is not None
 
 
 @dataclass(frozen=True)
@@ -34,16 +39,19 @@ class CandidateScore:
 
 
 class CandidateSearch:
-    """Thin coordinator around TransitionTracker, not a second transition detector.
+    """Thin coordinator around the existing TransitionTracker.
 
-    resolve_vehicle_id(camera_id, local_track_id) must consult the existing
-    global vehicle/tracklet association. If the source track has no registered
-    vehicle identity, no search task is created.
+    Registered path:
+      source local track -> resolver returns vehicle_id -> task follows vehicle.
 
-    Call update() once per frame per camera, passing all current (track_id, bbox)
-    pairs. Then call candidates_for() for a task to get the destination-camera
-    local tracks allowed by the existing ENTER-line logic. A caller-supplied
-    scorer can rank those candidates using Re-ID, OCR and timing evidence.
+    Unresolved path:
+      resolver returns None -> task still follows a temporary journey key built
+      from the source camera/track/exit frame. At the destination, candidate
+      observations can be ranked using source/destination features. If a match
+      is established, the caller may attach the resulting local track to a
+      global vehicle ID; if not, the journey can continue to the next camera.
+
+    The class does not implement Re-ID/OCR scoring or a new transition detector.
     """
 
     def __init__(
@@ -54,7 +62,7 @@ class CandidateSearch:
         self.network = network
         self.resolve_vehicle_id = resolve_vehicle_id
         self.trackers: dict[int, TransitionTracker] = create_trackers(network)
-        self.pending: dict[tuple[int, int], SearchTask] = {}
+        self.pending: dict[str, SearchTask] = {}
 
     def update(
         self,
@@ -71,21 +79,29 @@ class CandidateSearch:
             if command.type is not CommandType.SEARCH_ON_CAMERA:
                 continue
 
-            # A local track is resolved to the already-registered global vehicle.
             vehicle_id = self.resolve_vehicle_id(
                 command.source_camera, command.track_id
             )
-            if vehicle_id is None:
-                continue
+            # A journey exists even when no global identity can be resolved.
+            # Include exit frame so a later passage by the same local tracker
+            # creates a distinct journey.
+            task_id = (
+                f"vehicle:{vehicle_id}:to:{command.camera_id}:"
+                f"frame:{command.frame_id}"
+                if vehicle_id is not None
+                else f"journey:{command.source_camera}:{command.track_id}:"
+                     f"{command.frame_id}:to:{command.camera_id}"
+            )
 
             task = SearchTask(
-                vehicle_id=int(vehicle_id),
+                task_id=task_id,
+                vehicle_id=int(vehicle_id) if vehicle_id is not None else None,
                 source_camera=command.source_camera,
                 target_camera=command.camera_id,
                 exit_frame_id=command.frame_id,
                 source_track_id=command.track_id,
             )
-            self.pending[(task.vehicle_id, task.target_camera)] = task
+            self.pending[task.task_id] = task
 
         return commands
 
@@ -95,11 +111,7 @@ class CandidateSearch:
         visible_track_ids: Iterable[int],
         require_movement: bool = True,
     ) -> list[int]:
-        """Return visible destination tracks whose detected entry came from source.
-
-        Candidate IDs are local to task.target_camera. The source vehicle's
-        global ID remains task.vehicle_id and is not compared to those IDs.
-        """
+        """Return visible target-camera tracks with a confirmed entry from source."""
         if not self.network.has_transition(task.source_camera, task.target_camera):
             return []
 
@@ -122,19 +134,37 @@ class CandidateSearch:
         self,
         task: SearchTask,
         visible_track_ids: Iterable[int],
-        score: Callable[[int, int, int], Optional[float]],
+        score: Callable[[SearchTask, int, int], Optional[float]],
         require_movement: bool = True,
     ) -> list[CandidateScore]:
-        """Rank allowed local tracks via score(vehicle_id, target_camera, track_id).
+        """Rank candidates using score(task, target_camera, local_track_id).
 
-        The scorer is intentionally injected: this wrapper does not duplicate
-        Re-ID/OCR logic or invent their weights. Missing scores are skipped.
+        The scorer can compare stored global-vehicle features when vehicle_id is
+        known, or source-observation/journey features when it is not. The same
+        topology/movement filters apply in both cases.
         """
         ranked = []
         for track_id in self.candidates_for(
             task, visible_track_ids, require_movement=require_movement
         ):
-            value = score(task.vehicle_id, task.target_camera, track_id)
+            value = score(task, task.target_camera, track_id)
             if value is not None:
                 ranked.append(CandidateScore(track_id=track_id, score=float(value)))
         return sorted(ranked, key=lambda item: item.score, reverse=True)
+
+    def attach_identity(self, task_id: str, vehicle_id: int) -> SearchTask:
+        """Mark a previously unresolved journey as identified.
+
+        Persistence/track association is deliberately delegated to the caller.
+        """
+        task = self.pending[task_id]
+        identified = SearchTask(
+            task_id=task.task_id,
+            vehicle_id=int(vehicle_id),
+            source_camera=task.source_camera,
+            target_camera=task.target_camera,
+            exit_frame_id=task.exit_frame_id,
+            source_track_id=task.source_track_id,
+        )
+        self.pending[task_id] = identified
+        return identified
