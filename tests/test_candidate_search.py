@@ -75,6 +75,32 @@ def test_candidates_are_filtered_by_arrival_camera_and_movement():
     assert search.candidates_for(make_task(), [83, 91, 95, 96]) == [83]
 
 
+def test_unique_moving_candidate_can_be_confirmed_without_reid_or_ocr():
+    search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: None)
+    task = make_task(vehicle_id=None)
+    search.pending[task.task_id] = task
+    destination = search.trackers[5]
+    destination._arrived_from[83] = 4
+    destination.detector._motion_by_track[83] = (20.0, 0.0)
+
+    assert search.confirm_unique_candidate(task.task_id, [83]) == 83
+    assert search.active_tracks(5, [83]) == {83: task}
+
+
+def test_multiple_moving_candidates_remain_ambiguous():
+    search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: None)
+    task = make_task(vehicle_id=None)
+    search.pending[task.task_id] = task
+    destination = search.trackers[5]
+    destination._arrived_from[83] = 4
+    destination._arrived_from[84] = 4
+    destination.detector._motion_by_track[83] = (20.0, 0.0)
+    destination.detector._motion_by_track[84] = (20.0, 0.0)
+
+    assert search.confirm_unique_candidate(task.task_id, [83, 84]) is None
+    assert search.active_tracks(5, [83, 84]) == {}
+
+
 def test_ranker_receives_task_and_local_candidate_id():
     search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: 42)
     destination = search.trackers[5]
@@ -103,10 +129,8 @@ def test_confirmed_track_remains_active_when_stationary():
     search.pending[task.task_id] = task
 
     search.confirm_candidate(task.task_id, 83)
-
-    # It has stopped: it must no longer be a new moving candidate, but it must
-    # remain an active observation so the system can guide it to a parking place.
     destination.detector._motion_by_track[83] = (0.0, 0.0)
+
     assert search.candidates_for(task, [83]) == []
     assert search.active_tracks(5, [83]) == {83: task}
     assert search.active_tracks(5, []) == {}
