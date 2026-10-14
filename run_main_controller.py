@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any
 
 import cv2
 import numpy as np
@@ -78,9 +77,6 @@ def main() -> None:
     for warning in network.warnings:
         print("[TOPOLOGY WARNING]", warning)
 
-    with ZONES_PATH.open("r", encoding="utf-8") as stream:
-        zones_cfg = yaml.safe_load(stream) or {}
-
     # Reuse the existing registration components: feature galleries and OCR votes.
     features = FeaturesManager(Config.OSNET_MODEL_PATH)
     feature_managers = {
@@ -112,7 +108,6 @@ def main() -> None:
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
-    next_journey_number = 1
     registration_started = False
 
     def open_camera(camera_id: int, seek_frame: int = 0) -> None:
@@ -145,7 +140,7 @@ def main() -> None:
         return session_id if session and session["status"] == "active" else None
 
     def start_registration(track_id: int, frame_id: int) -> None:
-        nonlocal next_journey_number, registration_started
+        nonlocal registration_started
         key = (1, int(track_id))
         if key in registered_tracks:
             return
@@ -159,7 +154,6 @@ def main() -> None:
         # Match the existing runner's lazy stream startup / frame-index alignment.
         open_camera(2, frame_id)
         open_camera(3, frame_id)
-        next_journey_number = max(next_journey_number, journey_number + 1)
 
     def finish_gallery(camera_id: int, track_id: int, journey_number: int | None) -> None:
         if camera_id not in FEATURE_CAMERAS:
@@ -187,7 +181,7 @@ def main() -> None:
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
-        print("[CONTROLLER] Waiting for the existing camera-1 feature-zone trigger. Q/Esc exits.")
+        print("[CONTROLLER] Waiting for the existing TriggerProcess bbox/ROI trigger on camera 1. Q/Esc exits.")
 
         while captures:
             tiles: dict[int, np.ndarray] = {}
@@ -219,11 +213,10 @@ def main() -> None:
                 boxes, ids, tracks = unpack_tracks(result)
                 visible_ids = [int(tid) for tid in ids]
 
-                # Existing registration trigger: FeatureZoneManager activates tracks
-                # when the camera-specific anchor enters its configured polygon.
-                decisions = {}
+                # Registration collectors run on cameras 1-3. TriggerProcess
+                # decides when a journey becomes registered.
                 if camera_id in FEATURE_CAMERAS:
-                    decisions = feature_managers[camera_id].process_frame(
+                    feature_managers[camera_id].process_frame(
                         camera_id, frame_id, frame, tracks
                     )
                     if camera_id == 1:
