@@ -25,7 +25,6 @@ from FeatureZoneModule import EntrySessionManager, FeatureZoneManager
 from PlateOCRModule import PlateOCRTracker
 from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
-from TriggerModule.TriggerProcess import TriggerProcess
 
 
 ROOT = Path(__file__).resolve().parent
@@ -212,29 +211,25 @@ def main() -> None:
                 boxes, ids, tracks = unpack_tracks(result)
                 visible_ids = [int(tid) for tid in ids]
 
-                # Registration collectors run on cameras 1-3. TriggerProcess
-                # decides when a journey becomes registered.
+                # Use the current registration-zone logic from run_feature_capture:
+                # FeatureZoneManager activates a track when its configured anchor enters
+                # feature_zones.yaml. No legacy TriggerModule ROI/area trigger is involved.
+                active_ids = set()
                 if camera_id in FEATURE_CAMERAS:
                     feature_managers[camera_id].process_frame(
                         camera_id, frame_id, frame, tracks
                     )
-                    if camera_id == 1:
-                        # Reuse the existing TriggerProcess predicate, but apply it
-                        # to this controller-owned stream/tracker (no duplicate capture).
-                        for box, tid in zip(boxes, ids):
-                            key = (1, int(tid))
-                            if key in registered_tracks:
-                                continue
-                            if (
-                                TriggerProcess.bbox_center_in_roi(box, (1280, 720))
-                                and TriggerProcess.is_triggered_bbox(box)
-                            ):
-                                start_registration(int(tid), frame_id)
-
                     active_ids = {
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
                         if cam == camera_id
                     }
+                    if camera_id == 1:
+                        # Zone activation is the trigger; it is independent of the
+                        # feature-sampling interval configured in FeatureZoneManager.
+                        for tid in sorted(active_ids):
+                            key = (1, int(tid))
+                            if key not in registered_tracks:
+                                start_registration(int(tid), frame_id)
                     if frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
                         moving_tracks = [
                             (int(tid), box) for tid, box in zip(ids, boxes)
