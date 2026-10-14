@@ -247,7 +247,29 @@ def main() -> None:
                                 )
 
                 commands = transition_trackers[camera_id].update(frame_id, tracks)
+                exit_counts = Counter(
+                    command.track_id for command in commands
+                    if command.type is CommandType.SEARCH_ON_CAMERA
+                )
+                ambiguous_exit_tracks = {
+                    track_id for track_id, count in exit_counts.items() if count > 1
+                }
                 for command in commands:
+                    if (
+                        command.type is CommandType.SEARCH_ON_CAMERA
+                        and int(command.track_id) in ambiguous_exit_tracks
+                    ):
+                        targets = sorted(
+                            item.camera_id for item in commands
+                            if item.type is CommandType.SEARCH_ON_CAMERA
+                            and item.track_id == command.track_id
+                        )
+                        print(
+                            f"[AMBIGUOUS EXIT] camera={camera_id} track={command.track_id} "
+                            f"simultaneous_targets={targets}; fix overlapping topology lines"
+                        )
+                        continue
+
                     if command.type is CommandType.SEARCH_ON_CAMERA:
                         source_key = (command.source_camera, int(command.track_id))
                         journey_number = journey_by_track.pop(source_key, None)
