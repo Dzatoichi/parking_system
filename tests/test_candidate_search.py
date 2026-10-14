@@ -44,20 +44,17 @@ def test_task_uses_global_vehicle_identity_when_known():
 
 
 def test_unidentified_vehicle_still_has_a_search_task():
-    search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: None)
-    commands = search.update(4, 100, [(17, [1, 2, 3, 4])])
-
-    # Task creation is driven by the existing transition detector, so test the
-    # task model and pending registration independently of line-crossing setup.
     task = SearchTask(
-        task_id="journey:4:17:100:to:5",
+        task_id="journey:4:17:100",
         vehicle_id=None,
         source_camera=4,
         target_camera=5,
         exit_frame_id=100,
         source_track_id=17,
     )
+    search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: None)
     search.pending[task.task_id] = task
+
     assert task.vehicle_id is None
     assert not task.is_registered
     assert search.pending[task.task_id].source_camera == 4
@@ -69,9 +66,9 @@ def test_candidates_are_filtered_by_arrival_camera_and_movement():
 
     destination._arrived_from[83] = 4
     destination._arrived_from[91] = 6
-    destination.detector._motion_by_track[83] = (8.0, 0.0)
-    destination.detector._motion_by_track[91] = (8.0, 0.0)
-    destination.detector._motion_by_track[95] = (8.0, 0.0)
+    destination.detector._motion_by_track[83] = (20.0, 0.0)
+    destination.detector._motion_by_track[91] = (20.0, 0.0)
+    destination.detector._motion_by_track[95] = (20.0, 0.0)
     destination._arrived_from[96] = 4
     destination.detector._motion_by_track[96] = (0.0, 0.0)
 
@@ -82,7 +79,7 @@ def test_ranker_receives_task_and_local_candidate_id():
     search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: 42)
     destination = search.trackers[5]
     destination._arrived_from[83] = 4
-    destination.detector._motion_by_track[83] = (8.0, 0.0)
+    destination.detector._motion_by_track[83] = (20.0, 0.0)
     task = make_task()
     calls = []
 
@@ -97,16 +94,27 @@ def test_ranker_receives_task_and_local_candidate_id():
     assert ranked[0].score == 0.91
 
 
+def test_confirmed_track_remains_active_when_stationary():
+    search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: None)
+    destination = search.trackers[5]
+    destination._arrived_from[83] = 4
+    destination.detector._motion_by_track[83] = (20.0, 0.0)
+    task = make_task(vehicle_id=None)
+    search.pending[task.task_id] = task
+
+    search.confirm_candidate(task.task_id, 83)
+
+    # It has stopped: it must no longer be a new moving candidate, but it must
+    # remain an active observation so the system can guide it to a parking place.
+    destination.detector._motion_by_track[83] = (0.0, 0.0)
+    assert search.candidates_for(task, [83]) == []
+    assert search.active_tracks(5, [83]) == {83: task}
+    assert search.active_tracks(5, []) == {}
+
+
 def test_unresolved_journey_can_be_attached_to_vehicle_later():
     search = CandidateSearch(make_network(), resolve_vehicle_id=lambda cam, tid: None)
-    task = SearchTask(
-        task_id="journey:4:17:100:to:5",
-        vehicle_id=None,
-        source_camera=4,
-        target_camera=5,
-        exit_frame_id=100,
-        source_track_id=17,
-    )
+    task = make_task(vehicle_id=None)
     search.pending[task.task_id] = task
 
     identified = search.attach_identity(task.task_id, vehicle_id=42)
