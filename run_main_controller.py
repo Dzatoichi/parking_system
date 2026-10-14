@@ -17,7 +17,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-import yaml
 from ultralytics import YOLO
 
 from Config import Config
