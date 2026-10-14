@@ -1,7 +1,7 @@
 """Candidate-search orchestration over the existing camera-transition algorithm.
 
-A search can follow either a registered global vehicle or an unresolved journey.
-Camera-local track IDs are observation references, never global vehicle identity.
+A search follows a registered vehicle or an unresolved journey. Local track IDs
+are observation references, never global vehicle identity.
 """
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
@@ -17,14 +17,13 @@ from TopologyModule.TransitionTracker import (
 
 @dataclass(frozen=True)
 class SearchTask:
-    """A search journey; vehicle_id is absent until identity is established."""
+    """A journey; vehicle_id remains absent until identity is established."""
 
     task_id: str
     vehicle_id: Optional[int]
     source_camera: int
     target_camera: int
     exit_frame_id: int
-    # Diagnostic observation reference, not the identity of the task.
     source_track_id: int
 
     @property
@@ -39,19 +38,12 @@ class CandidateScore:
 
 
 class CandidateSearch:
-    """Thin coordinator around the existing TransitionTracker.
+    """Coordinate camera handoffs; leave Re-ID/OCR scoring to the caller.
 
-    Registered path:
-      source local track -> resolver returns vehicle_id -> task follows vehicle.
-
-    Unresolved path:
-      resolver returns None -> task still follows a temporary journey key built
-      from the source camera/track/exit frame. At the destination, candidate
-      observations can be ranked using source/destination features. If a match
-      is established, the caller may attach the resulting local track to a
-      global vehicle ID; if not, the journey can continue to the next camera.
-
-    The class does not implement Re-ID/OCR scoring or a new transition detector.
+    Only moving, topology-eligible tracks are considered as *new candidates*.
+    Once a candidate is confirmed, its observation is kept active even when it
+    stops. When that active observation exits, the same journey is propagated
+    to the next camera, including journeys without a global vehicle_id.
     """
 
     def __init__(
@@ -63,6 +55,8 @@ class CandidateSearch:
         self.resolve_vehicle_id = resolve_vehicle_id
         self.trackers: dict[int, TransitionTracker] = create_trackers(network)
         self.pending: dict[str, SearchTask] = {}
+        # (camera_id, local_track_id) -> journey currently confirmed on that camera
+        self.active_by_track: dict[tuple[int, int], SearchTask] = {}
 
     def update(
         self,
@@ -79,19 +73,30 @@ class CandidateSearch:
             if command.type is not CommandType.SEARCH_ON_CAMERA:
                 continue
 
-            vehicle_id = self.resolve_vehicle_id(
+            source_key = (command.source_camera, command.track_id)
+            active_task = self.active_by_track.pop(source_key, None)
+            resolved_id = self.resolve_vehicle_id(
                 command.source_camera, command.track_id
             )
-            # A journey exists even when no global identity can be resolved.
-            # Include exit frame so a later passage by the same local tracker
-            # creates a distinct journey.
-            task_id = (
-                f"vehicle:{vehicle_id}:to:{command.camera_id}:"
-                f"frame:{command.frame_id}"
-                if vehicle_id is not None
-                else f"journey:{command.source_camera}:{command.track_id}:"
-                     f"{command.frame_id}:to:{command.camera_id}"
+            vehicle_id = (
+                active_task.vehicle_id
+                if active_task is not None and active_task.vehicle_id is not None
+                else resolved_id
             )
+
+            # Preserve journey identity across camera-local track ID changes.
+            if active_task is not None:
+                task_id = active_task.task_id
+            elif vehicle_id is not None:
+                task_id = (
+                    f"vehicle:{vehicle_id}:from:{command.source_camera}:"
+                    f"track:{command.track_id}:frame:{command.frame_id}"
+                )
+            else:
+                task_id = (
+                    f"journey:{command.source_camera}:{command.track_id}:"
+                    f"{command.frame_id}"
+                )
 
             task = SearchTask(
                 task_id=task_id,
@@ -111,7 +116,7 @@ class CandidateSearch:
         visible_track_ids: Iterable[int],
         require_movement: bool = True,
     ) -> list[int]:
-        """Return visible target-camera tracks with a confirmed entry from source."""
+        """Return eligible moving tracks that entered target_camera from source."""
         if not self.network.has_transition(task.source_camera, task.target_camera):
             return []
 
@@ -125,6 +130,7 @@ class CandidateSearch:
                 continue
             if not tracker.is_eligible(track_id, task.source_camera):
                 continue
+            # Movement is a gate for initial candidate selection only.
             if require_movement and not tracker.detector.is_moving(track_id):
                 continue
             result.append(track_id)
@@ -137,12 +143,7 @@ class CandidateSearch:
         score: Callable[[SearchTask, int, int], Optional[float]],
         require_movement: bool = True,
     ) -> list[CandidateScore]:
-        """Rank candidates using score(task, target_camera, local_track_id).
-
-        The scorer can compare stored global-vehicle features when vehicle_id is
-        known, or source-observation/journey features when it is not. The same
-        topology/movement filters apply in both cases.
-        """
+        """Rank candidates with score(task, target_camera, local_track_id)."""
         ranked = []
         for track_id in self.candidates_for(
             task, visible_track_ids, require_movement=require_movement
@@ -152,11 +153,38 @@ class CandidateSearch:
                 ranked.append(CandidateScore(track_id=track_id, score=float(value)))
         return sorted(ranked, key=lambda item: item.score, reverse=True)
 
-    def attach_identity(self, task_id: str, vehicle_id: int) -> SearchTask:
-        """Mark a previously unresolved journey as identified.
+    def confirm_candidate(
+        self, task_id: str, target_track_id: int
+    ) -> SearchTask:
+        """Confirm a moving eligible candidate and keep following it if it stops."""
+        task = self.pending[task_id]
+        tracker = self.trackers[task.target_camera]
+        if not tracker.is_eligible(target_track_id, task.source_camera):
+            raise ValueError("Трек не пересёк входную линию от ожидаемой камеры")
+        if not tracker.detector.is_moving(target_track_id):
+            raise ValueError("Новый кандидат должен двигаться в момент подтверждения")
 
-        Persistence/track association is deliberately delegated to the caller.
+        self.active_by_track[(task.target_camera, int(target_track_id))] = task
+        return task
+
+    def active_tracks(
+        self, camera_id: int, visible_track_ids: Iterable[int]
+    ) -> dict[int, SearchTask]:
+        """Return confirmed visible tracks, including currently stationary vehicles.
+
+        Do not apply the candidate movement filter here: after confirmation,
+        maintaining identity and following the vehicle to its parking place takes
+        priority over whether it is moving in this frame.
         """
+        visible = {int(track_id) for track_id in visible_track_ids}
+        return {
+            track_id: task
+            for (cam_id, track_id), task in self.active_by_track.items()
+            if cam_id == camera_id and track_id in visible
+        }
+
+    def attach_identity(self, task_id: str, vehicle_id: int) -> SearchTask:
+        """Attach a newly established global identity to an unresolved journey."""
         task = self.pending[task_id]
         identified = SearchTask(
             task_id=task.task_id,
@@ -167,4 +195,9 @@ class CandidateSearch:
             source_track_id=task.source_track_id,
         )
         self.pending[task_id] = identified
+
+        # Update any active observation already attached to this journey.
+        for key, active_task in list(self.active_by_track.items()):
+            if active_task.task_id == task_id:
+                self.active_by_track[key] = identified
         return identified
