@@ -41,9 +41,9 @@ class CandidateSearch:
     """Coordinate camera handoffs; leave Re-ID/OCR scoring to the caller.
 
     Only moving, topology-eligible tracks are considered as *new candidates*.
-    Once a candidate is confirmed, its observation is kept active even when it
-    stops. When that active observation exits, the same journey is propagated
-    to the next camera, including journeys without a global vehicle_id.
+    If exactly one candidate is present, it can be confirmed by exclusivity
+    without Re-ID/OCR. When several candidates exist, the caller can rank them.
+    Once confirmed, an observation remains active even when its vehicle stops.
     """
 
     def __init__(
@@ -55,7 +55,6 @@ class CandidateSearch:
         self.resolve_vehicle_id = resolve_vehicle_id
         self.trackers: dict[int, TransitionTracker] = create_trackers(network)
         self.pending: dict[str, SearchTask] = {}
-        # (camera_id, local_track_id) -> journey currently confirmed on that camera
         self.active_by_track: dict[tuple[int, int], SearchTask] = {}
 
     def update(
@@ -84,7 +83,7 @@ class CandidateSearch:
                 else resolved_id
             )
 
-            # Preserve journey identity across camera-local track ID changes.
+            # Keep the same journey identity across camera-local track ID changes.
             if active_task is not None:
                 task_id = active_task.task_id
             elif vehicle_id is not None:
@@ -135,6 +134,22 @@ class CandidateSearch:
                 continue
             result.append(track_id)
         return sorted(result)
+
+    def confirm_unique_candidate(
+        self, task_id: str, visible_track_ids: Iterable[int]
+    ) -> Optional[int]:
+        """Confirm the sole eligible moving candidate without invoking Re-ID/OCR.
+
+        Returns its camera-local track ID when exactly one candidate exists.
+        Returns None for zero or multiple candidates; the caller can then wait or
+        invoke Re-ID/OCR scoring to resolve ambiguity.
+        """
+        task = self.pending[task_id]
+        candidates = self.candidates_for(task, visible_track_ids)
+        if len(candidates) != 1:
+            return None
+        self.confirm_candidate(task_id, candidates[0])
+        return candidates[0]
 
     def rank_candidates(
         self,
@@ -196,7 +211,6 @@ class CandidateSearch:
         )
         self.pending[task_id] = identified
 
-        # Update any active observation already attached to this journey.
         for key, active_task in list(self.active_by_track.items()):
             if active_task.task_id == task_id:
                 self.active_by_track[key] = identified
