@@ -17,6 +17,21 @@ class Config:
 
     DEVICE: str = "cpu"
 
+    # Local video files / RTSP URLs for cameras 1-9.
+    # Set unused sources to "". Feature capture currently processes only cameras 1-3;
+    # cameras 4-9 are configured here for the wider tracking pipeline, not Re-ID capture.
+    CAMERA_VIDEO_PATHS = {
+        1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/one-time/vezd.mov"),
+        2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/one-time/sboku.mov"),
+        3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/szadi.mov"),
+        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/1/5007.ts"),
+        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/1/5005_vniz.ts"),
+        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/1/5005_vverh.ts"),
+        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/1/5003_vniz.ts"),
+        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/1/5003_vverh.ts"),
+        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/1/5009.ts"),
+    }
+
     # Сеть камер и линии перехода (см. TopologyModule, проверка: python check_topology.py)
     TOPOLOGY_CONFIG_PATH = str(BASE_DIR / "topology.yaml")
     # Детектор переходов: событие возникает, когда линия находится
@@ -33,18 +48,18 @@ class Config:
     TRANSITION_FORGET_FRAMES = 150
 
     YOLO_TRACK_CONFIG_PATH = str(BASE_DIR / "vehicle_botsort_conf.yaml")
-    YOLO_CAR_MODEL_PATH = str(BASE_DIR / "Models/Tracking/YOLO26/1809_epoch0.pt")
+    YOLO_CAR_MODEL_PATH = str(BASE_DIR / "Models/Tracking/2009/2009_best.pt")
     # OSNET_MODEL_PATH = str(BASE_DIR / "Models/ReID/OSNet/model_veri_1.pth")
-    OSNET_MODEL_PATH = str(BASE_DIR / "Models/ReID/OSNet/model_new_6.pth")
+    OSNET_MODEL_PATH = str(BASE_DIR / "Models/ReID/OSNet/1110/A/model_20_a.pth")
 
     # OCR integration: plate detector runs inside the tracked vehicle crop, then PARSeq reads the plate crop.
     YOLO_PLATE_MODEL_PATH = os.getenv(
         "PARKING_PLATE_YOLO_MODEL_PATH",
-        str(BASE_DIR / "Models/PlateRecognition/YOLOv8/best.pt"),
+        str(BASE_DIR / "Models/OCR/best_yolo26.pt"),
     )
     OCR_MODEL_PATH = os.getenv(
         "PARKING_OCR_MODEL_PATH",
-        str(BASE_DIR / "ocr_plate_number_soft/best_ocr.pt"),
+        str(BASE_DIR / "Models/OCR/best_ocr.pt"),
     )
     OCR_EVERY_N_FRAMES = int(os.getenv("PARKING_OCR_EVERY_N_FRAMES", "5"))
     OCR_PLATE_CONF_THRESHOLD = float(os.getenv("PARKING_PLATE_CONF_THRESHOLD", "0.50"))

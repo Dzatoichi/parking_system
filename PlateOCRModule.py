@@ -12,6 +12,18 @@ from ultralytics import YOLO
 from ocr_plate_number_soft.ocr_pipeline import OCRPipeline
 
 
+_PLATE_CHAR_MAP = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
+    "О": "O", "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X",
+})
+
+
+def normalize_plate_text(text: str) -> str:
+    """Normalize visually equivalent Cyrillic/Latin plate letters and spacing."""
+    value = str(text or "").upper().translate(_PLATE_CHAR_MAP)
+    return "".join(char for char in value if char.isalnum())
+
+
 @dataclass
 class PlateReading:
     text: str
@@ -32,6 +44,7 @@ class PlateOCRTracker:
         plate_imgsz: int = 640,
         ocr_device: str = "auto",
         ocr_batch_size: int = 32,
+        plate_device: str | int = "cpu",
     ) -> None:
         plate_model_path = Path(plate_model_path)
         ocr_checkpoint_path = Path(ocr_checkpoint_path)
@@ -48,6 +61,7 @@ class PlateOCRTracker:
             )
 
         self.plate_model = YOLO(str(plate_model_path))
+        self.plate_device = plate_device
         self.ocr = OCRPipeline(
             ocr_checkpoint_path,
             device=ocr_device,
@@ -97,6 +111,7 @@ class PlateOCRTracker:
             conf=self.plate_conf,
             iou=self.plate_iou,
             verbose=False,
+            device=self.plate_device,
         )
 
         plate_images: List[Image.Image] = []
@@ -137,7 +152,7 @@ class PlateOCRTracker:
         readings: Dict[int, PlateReading] = {}
 
         for (track_id, plate_conf), pred in zip(plate_meta, predictions):
-            text = str(pred.get("text", "")).strip()
+            text = normalize_plate_text(str(pred.get("text", "")).strip())
             if not text:
                 continue
 
