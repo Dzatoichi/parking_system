@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 from Config import Config
@@ -154,12 +155,7 @@ def main() -> None:
                 row_tiles = []
                 for camera_id in camera_ids[start:start + GRID_COLS]:
                     row_tiles.append(
-                        tiles.get(camera_id, cv2.resize(
-                            cv2.cvtColor(
-                                cv2.UMat(TILE_H, TILE_W, cv2.CV_8UC3).get(),
-                                cv2.COLOR_BGR2RGB
-                            ), (TILE_W, TILE_H)
-                        ))
+                        tiles.get(camera_id, np.zeros((TILE_H, TILE_W, 3), dtype=np.uint8))
                     )
                 if row_tiles:
                     rows.append(cv2.hconcat(row_tiles))
