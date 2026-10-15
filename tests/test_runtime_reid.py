@@ -31,6 +31,13 @@ class RuntimeReIDTests(unittest.TestCase):
         ]
         self.assertIsNone(self.reid.match_track_to_journey(4, 12, 7))
 
+    def test_adaptive_sampling_rejects_a_duplicate_of_last_accepted_view(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        track = [(12, [10, 10, 80, 80])]
+        self.reid.update_camera(4, 0, frame, track)
+        self.reid.update_camera(4, 1, frame, track)
+        self.assertEqual(len(self.reid.track_features[(4, 12)]), 1)
+
     def test_ignores_invalid_embedding(self):
         self.assertIsNone(RuntimeReID._valid(np.array([0.0, 0.0])))
         self.assertIsNone(RuntimeReID._valid(np.array([np.nan, 1.0])))
