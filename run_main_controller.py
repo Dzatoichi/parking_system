@@ -394,13 +394,19 @@ def main() -> None:
                     # A handoff may have just opened its target; wait for its first frame.
                     continue
             ordered_ids = sorted(tiles)
+            columns = 3
+            cell_width, cell_height = TILE_SIZE
             rows = []
-            for offset in range(0, len(ordered_ids), 3):
-                row = []
-                for cid in ordered_ids[offset:offset + 3]:
-                    row.append(tiles.get(cid, np.zeros((TILE_SIZE[1], TILE_SIZE[0], 3), dtype=np.uint8)))
-                rows.append(cv2.hconcat(row))
-            cv2.imshow(WINDOW_NAME, cv2.vconcat(rows))
+            for offset in range(0, len(ordered_ids), columns):
+                row_tiles = [tiles[cid] for cid in ordered_ids[offset:offset + columns]]
+                # Pad the last row so every row has the same width for vconcat.
+                while len(row_tiles) < columns:
+                    row_tiles.append(
+                        np.zeros((cell_height, cell_width, 3), dtype=np.uint8)
+                    )
+                rows.append(cv2.hconcat(row_tiles))
+            if rows:
+                cv2.imshow(WINDOW_NAME, cv2.vconcat(rows))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
