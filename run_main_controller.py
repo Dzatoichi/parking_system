@@ -107,6 +107,8 @@ def main() -> None:
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
     registration_started = False
+    registration_completed = False
+    search_mode = False
 
     def open_camera(camera_id: int, seek_frame: int = 0) -> None:
         if camera_id in captures or camera_id in ended:
@@ -149,9 +151,11 @@ def main() -> None:
         session_by_journey[journey_number] = session.session_id
         registration_started = True
         print(f"[REGISTER] journey={journey_number} camera=1 track={track_id} session={session.session_id}")
-        # Match the existing runner's lazy stream startup / frame-index alignment.
+        # Registration view: keep the three capture cameras and camera 4 visible
+        # as the first downstream/search camera. Each stream still has one owner.
         open_camera(2, frame_id)
         open_camera(3, frame_id)
+        open_camera(4, frame_id)
 
     def finish_gallery(camera_id: int, track_id: int, journey_number: int | None) -> None:
         if camera_id not in FEATURE_CAMERAS:
@@ -179,7 +183,7 @@ def main() -> None:
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
-        print("[CONTROLLER] Waiting for the existing TriggerProcess bbox/ROI trigger on camera 1. Q/Esc exits.")
+        print("[CONTROLLER] Waiting for a vehicle to enter the configured feature zone on camera 1. Q/Esc exits.")
 
         while captures:
             tiles: dict[int, np.ndarray] = {}
@@ -279,6 +283,7 @@ def main() -> None:
                         if command.source_camera == 2:
                             completed = sessions.finish_on_camera2_track_lost(command.track_id)
                             if completed:
+                                registration_completed = True
                                 print(
                                     f"[REGISTRATION COMPLETE] journey={journey_number} "
                                     f"camera=2 track={command.track_id}"
@@ -342,7 +347,11 @@ def main() -> None:
 
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
-                phase = "REGISTRATION + SEARCH" if registration_started else "WAITING FOR TRIGGER"
+                phase = (
+                    "SEARCH / DOWNSTREAM CAMERAS" if search_mode
+                    else "REGISTRATION + CAMERA 4 SEARCH VIEW" if registration_started
+                    else "WAITING FOR FEATURE ZONE"
+                )
                 cv2.putText(tile, f"CAM {camera_id} | {phase}", (10, 21),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
                 tiles[camera_id] = tile
@@ -351,7 +360,26 @@ def main() -> None:
             if not tiles:
                 break
 
-            ordered_ids = sorted(set(network.camera_ids) | set(tiles))
+            # Switch the UI and stream set only after every registered session has
+            # completed its camera-2 registration leg. Keep downstream streams (4-9)
+            # and any lazily opened search targets; remove registration cameras 1-3.
+            if registration_completed and not sessions.active_sessions() and not search_mode:
+                search_mode = True
+                for registration_camera in FEATURE_CAMERAS:
+                    cap = captures.pop(registration_camera, None)
+                    if cap is not None:
+                        cap.release()
+                    models.pop(registration_camera, None)
+                    print(f"[SEARCH VIEW] removed registration camera {registration_camera}")
+                print("[SEARCH VIEW] registration finished; showing downstream/search cameras only")
+
+            if search_mode:
+                tiles = {cid: tile for cid, tile in tiles.items() if cid not in FEATURE_CAMERAS}
+                if not tiles and captures:
+                    # Streams may have been opened in this same cycle; the next loop
+                    # will produce their first search-view frames.
+                    continue
+            ordered_ids = sorted(tiles)
             rows = []
             for offset in range(0, len(ordered_ids), 3):
                 row = []
