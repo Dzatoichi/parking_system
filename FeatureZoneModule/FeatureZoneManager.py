@@ -95,6 +95,12 @@ class FeatureZoneManager:
                 return name
         return None
 
+    def is_in_zone(self, camera_id: int, bbox) -> bool:
+        """Check scan-zone membership without extracting or storing appearance features."""
+        if int(camera_id) not in (1, 2, 3):
+            return False
+        return self._matching_profile(int(camera_id), bbox) is not None
+
     def process_frame(self, camera_id: int, frame_id: int, frame: np.ndarray,
                       tracks: Iterable[tuple[int, Iterable[float]]],
                       entry_gate: str | None = None) -> dict[int, bool]:
