@@ -777,4 +777,22 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import traceback
+
+    try:
+        main()
+    except BaseException:
+        error_text = traceback.format_exc()
+        error_path = ROOT / "startup_error.log"
+        try:
+            error_path.write_text(error_text, encoding="utf-8")
+        except Exception:
+            pass
+        print("\n[CONTROLLER FATAL ERROR] Full traceback:")
+        print(error_text)
+        print(f"[CONTROLLER FATAL ERROR] Saved to: {error_path}")
+        try:
+            input("Press Enter to close...")
+        except (EOFError, OSError):
+            pass
+        raise
