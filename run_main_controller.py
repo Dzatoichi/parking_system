@@ -303,13 +303,21 @@ def main() -> None:
                 # feature_zones.yaml. No legacy TriggerModule ROI/area trigger is involved.
                 active_ids = set()
                 if camera_id in FEATURE_CAMERAS:
-                    feature_managers[camera_id].process_frame(
-                        camera_id, frame_id, frame, tracks
-                    )
-                    active_ids = {
-                        tid for cam, tid in feature_managers[camera_id].active_track_keys()
-                        if cam == camera_id
-                    }
+                    if camera_id == 1:
+                        # Camera 1 is scan/OCR only: test zone membership without
+                        # running the Re-ID extractor or building an appearance gallery.
+                        active_ids = {
+                            int(tid) for tid, box in zip(ids, boxes)
+                            if feature_managers[1].is_in_zone(1, box)
+                        }
+                    else:
+                        feature_managers[camera_id].process_frame(
+                            camera_id, frame_id, frame, tracks
+                        )
+                        active_ids = {
+                            tid for cam, tid in feature_managers[camera_id].active_track_keys()
+                            if cam == camera_id
+                        }
                     if camera_id == 2:
                         # FIFO is permitted only between the scan station and the
                         # useful overview camera. It is never used on cameras 4-9.
