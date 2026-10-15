@@ -61,15 +61,16 @@ def best_plate(votes: dict[str, list[float]]) -> tuple[str, float]:
     return plate, sum(scores) / len(scores)
 
 
-def draw_journey_label(image, box, journey_number: int) -> None:
+def draw_text_label(image, box, label: str, color) -> None:
     x1, y1, _, _ = map(int, box)
-    label = str(journey_number)
-    font, scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2
+    font, scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2
     (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
-    top = max(0, y1 - th - baseline - 7)
-    cv2.rectangle(image, (max(0, x1), top), (max(0, x1) + tw + 10, y1), (0, 0, 0), -1)
-    cv2.putText(image, label, (max(0, x1) + 5, max(th + 2, y1 - baseline - 4)),
-                font, scale, (0, 255, 255), thickness, cv2.LINE_AA)
+    text_y = max(th + baseline + 4, y1 - 7)
+    bg_x1, bg_y1 = max(0, x1), max(0, text_y - th - baseline - 4)
+    bg_x2 = min(image.shape[1] - 1, bg_x1 + tw + 10)
+    bg_y2 = min(image.shape[0] - 1, text_y + baseline + 3)
+    cv2.rectangle(image, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(image, label, (bg_x1 + 5, text_y), font, scale, color, thickness, cv2.LINE_AA)
 
 
 def main() -> None:
@@ -537,24 +538,49 @@ def main() -> None:
                 display = frame.copy()
                 for box, track_id in zip(boxes, ids):
                     track_id = int(track_id)
+                    key = (camera_id, track_id)
                     x1, y1, x2, y2 = map(int, box)
-                    journey_number = journey_by_track.get((camera_id, track_id))
-                    color = (0, 220, 0) if journey_number is not None else (185, 185, 185)
-                    cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-                    if journey_number is not None:
-                        draw_journey_label(display, box, journey_number)
+                    global_id = journey_by_track.get(key)
+                    if camera_id == 1:
+                        # Scan station: blue detections, green tracks inside scan zone.
+                        color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
+                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+                        if track_id in active_ids and global_id is not None:
+                            plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
+                            if plate != "UNKNOWN":
+                                draw_text_label(display, box, plate, color)
+                    elif global_id is not None:
+                        # Identified vehicles remain green regardless of motion.
+                        color = (0, 255, 0)
+                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+                        plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
+                        if plate != "UNKNOWN":
+                            draw_text_label(display, box, plate, color)
+                    elif movement_state.get(key, False):
+                        # Moving but not yet identified: yellow with camera-local BoT-SORT ID.
+                        color = (0, 255, 255)
+                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+                        draw_text_label(display, box, f"LOCAL {track_id}", color)
+                    else:
+                        # Stationary vehicles: red, no label.
+                        color = (0, 0, 255)
+                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
 
-                # Show the actual configured topology lines, which are the movement signals.
-                for line in network.camera(camera_id).lines:
+                # Camera 1 is scan-only; draw topology lines only on cameras 2-9.
+                if camera_id != 1:
+                    for line in network.camera(camera_id).lines:
+                        p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
+                        cv2.line(display, p1, p2, (0, 0, 255), 2)
                     p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
                     cv2.line(display, p1, p2, (0, 0, 255), 2)
 
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
                 phase = (
-                    "REGISTRATION CAPTURE" if camera_id in FEATURE_CAMERAS
-                    else "NETWORK SEARCH TASK"
-                ) if registration_started else "WAITING FOR FEATURE ZONE"
+                    "PLATE SCAN ONLY" if camera_id == 1
+                    else "SCAN ZONE / RE-ID GALLERY" if camera_id in GALLERY_CAMERAS
+                    else "MOVEMENT + TOPOLOGY + RE-ID"
+                )
                 cv2.putText(tile, f"CAM {camera_id} | {phase}", (10, 21),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
                 tiles[camera_id] = tile
@@ -617,7 +643,7 @@ def main() -> None:
             "reid_expired_handoffs": reid_expired,
             "journey_plates": plate_summary,
             "feature_galleries_closed": {str(cid): int(count) for cid, count in feature_closed.items()},
-            "ocr_cameras": list(FEATURE_CAMERAS),
+            "ocr_cameras": list(OCR_CAMERAS),
             "database_writes": "enabled" if database is not None else "disabled",
         }
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
