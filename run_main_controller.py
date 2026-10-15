@@ -1,13 +1,8 @@
-"""Main controller: registration, camera transitions and FIFO journey tracking.
+"""Nine-camera controller: scan-zone registration, topology-scoped Re-ID, scan-zone OCR.
 
-Run: python run_main_controller.py
-
-The controller owns all video streams and all per-camera YOLO/BoT-SORT trackers.
-Streams 2/3 are opened at the camera-1 registration trigger (like
-run_feature_capture.py); other streams are opened lazily on a topology handoff and
-seek to the source exit frame index. Journey numbers are assigned at registration
-and carried through topology ENTER/EXIT events in FIFO order. Re-ID features and
-OCR are collected during registration, but are not used to resolve handoffs yet.
+All configured streams advance independently. FIFO is restricted to cameras 1-3;
+other handoffs require both a topology ENTER event and an appearance match.
+OCR runs only for active scan-zone tracks on cameras 1-3.
 """
 from __future__ import annotations
 
@@ -113,6 +108,7 @@ def main() -> None:
     pending_reid: dict[tuple[int, int], list[int]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
     registration_started = False
     registration_completed = False
@@ -166,19 +162,25 @@ def main() -> None:
         if camera_id not in FEATURE_CAMERAS:
             return
         gallery = feature_managers[camera_id].end_track(camera_id, int(track_id))
-        if gallery is None:
-            return
-        feature_closed[camera_id] += 1
+        feature_count = 0
+        if gallery is not None:
+            feature_closed[camera_id] += 1
+            feature_count = len(gallery.get("original", [])) + len(gallery.get("flipped", []))
+            if journey_number is not None:
+                runtime_reid.add_identity_gallery(int(journey_number), gallery)
+            session_id = session_for_journey(journey_number) if journey_number is not None else None
+            if session_id:
+                sessions.attach_gallery(session_id, camera_id, gallery)
+        local_votes = plate_votes.get((camera_id, int(track_id)), {})
         if journey_number is not None:
-            runtime_reid.add_identity_gallery(int(journey_number), gallery)
-        session_id = session_for_journey(journey_number) if journey_number is not None else None
-        if session_id:
-            sessions.attach_gallery(session_id, camera_id, gallery)
-        plate, confidence = best_plate(plate_votes.get((camera_id, int(track_id)), {}))
+            for text, scores in local_votes.items():
+                journey_plate_votes[int(journey_number)][text].extend(scores)
+            plate, confidence = best_plate(journey_plate_votes[int(journey_number)])
+        else:
+            plate, confidence = best_plate(local_votes)
         print(
             f"[REGISTRATION DATA] journey={journey_number if journey_number is not None else '-'} "
-            f"camera={camera_id} track={track_id} "
-            f"features={len(gallery.get('original', [])) + len(gallery.get('flipped', []))} "
+            f"camera={camera_id} track={track_id} features={feature_count} "
             f"plate={plate} ocr_conf={confidence:.2f}"
         )
         plate_votes.pop((camera_id, int(track_id)), None)
@@ -295,10 +297,13 @@ def main() -> None:
                         if command.source_camera in FEATURE_CAMERAS and command.camera_id in FEATURE_CAMERAS:
                             waiting[pair].append((journey_number, session_id))
                         else:
-                            runtime_reid.extend_identity(
-                                journey_number, command.source_camera, command.track_id
-                            )
+                            if command.source_camera not in FEATURE_CAMERAS:
+                                runtime_reid.extend_identity(
+                                    journey_number, command.source_camera, command.track_id
+                                )
                             pending_reid[pair].append(journey_number)
+                        # Source track embeddings are no longer needed once handed off.
+                        runtime_reid.forget_track(command.source_camera, command.track_id)
 
                         # Registration is considered complete exactly at camera-2 EXIT.
                         if command.source_camera == 2:
@@ -385,6 +390,9 @@ def main() -> None:
                         )
                     if not journey_ids:
                         pending_reid.pop((source_camera, target_camera), None)
+
+                for dropped_track_id in transition_trackers[camera_id].detector.dropped_tracks:
+                    runtime_reid.forget_track(camera_id, int(dropped_track_id))
 
                 # Keep feature gallery closure in sync if the track was lost without an EXIT.
                 if camera_id in FEATURE_CAMERAS:
