@@ -196,6 +196,11 @@ def main() -> None:
         key = (1, int(track_id))
         if key in registered_tracks:
             return
+        entry_bbox = next((box for tid, box in current_tracks if int(tid) == int(track_id)), None)
+        entry_lane = feature_managers[1]._matching_profile(1, entry_bbox) if entry_bbox is not None else None
+        if entry_lane is None:
+            print(f"[SCAN FIFO WARNING] camera=1 track={track_id} has no LEFT/RIGHT entry lane; not enqueueing")
+            return
         session = sessions.register_entry(1, int(track_id), int(frame_id))
         journey_number = database.create_vehicle(1, int(track_id), int(frame_id)) if database is not None else session.entry_order
         registered_tracks.add(key)
@@ -209,10 +214,6 @@ def main() -> None:
         visual_camera_pool.update(SCAN_CAMERAS)
         # Store the actual target-camera frame after timestamp seeking, otherwise
         # the FIFO TTL would be measured from frame zero and could expire instantly.
-        entry_bbox = next((box for tid, box in current_tracks if int(tid) == int(track_id)), None)
-        entry_lane = feature_managers[1]._matching_profile(1, entry_bbox) if entry_bbox is not None else None
-        if entry_lane is None:
-            entry_lane = "LEFT"
         scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0), entry_lane))
         print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
         print(f"[SCAN ACTIVATION] cameras=1,2,3 trigger_time={trigger_time:.2f}s")
