@@ -101,6 +101,9 @@ class Config:
     MATCH_VEHICLE_BATCH_SIZE = 32
     # Сколько разных по времени эмбеддингов хранить в текущем tracklet.
     TRACKLET_MAX_FEATURES = 5
+    # Runtime controller Re-ID sampling on all nine cameras.
+    RUNTIME_REID_EVERY_N_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_EVERY_N_FRAMES", "5"))
+    RUNTIME_REID_MIN_SAMPLES = int(os.getenv("PARKING_RUNTIME_REID_MIN_SAMPLES", "2"))
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
     # 1 - мягкое затухание, большое число (например 99) - требуем совпадения строго подряд.
     CANDIDATE_MISS_PENALTY = 1
