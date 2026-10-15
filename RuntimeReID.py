@@ -41,8 +41,8 @@ class RuntimeReID:
                 if normalized is not None:
                     self.identity_gallery[int(journey_id)].append(normalized)
 
-    def update_camera(self, camera_id: int, frame_id: int, frame, tracks) -> None:
-        """Sample vehicle crops on all cameras; OCR is deliberately not part of this class."""
+    def update_camera(self, camera_id: int, frame_id: int, frame, tracks) -> list[tuple[int, np.ndarray]]:
+        """Sample only the supplied (already movement-filtered) tracks."""
         images, keys = [], []
         for track_id, bbox in tracks:
             key = (int(camera_id), int(track_id))
@@ -61,16 +61,19 @@ class RuntimeReID:
             keys.append(key)
             self.last_sample_frame[key] = int(frame_id)
         if not images:
-            return
+            return []
         try:
             vectors = self.feature_manager.extract_features(images)
         except Exception:
             logger.exception("Runtime Re-ID extraction failed on camera %s", camera_id)
-            return
+            return []
+        accepted = []
         for key, vector in zip(keys, vectors):
             normalized = self._valid(vector)
             if normalized is not None:
                 self.track_features[key].append(normalized)
+                accepted.append((key[1], normalized.copy()))
+        return accepted
 
     @staticmethod
     def _score(track_features, identity_features) -> float:
