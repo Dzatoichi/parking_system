@@ -68,11 +68,20 @@ class RuntimeReID:
             logger.exception("Runtime Re-ID extraction failed on camera %s", camera_id)
             return []
         accepted = []
+        duplicate_threshold = float(
+            getattr(Config, "RUNTIME_REID_DUPLICATE_THRESHOLD", 0.90)
+        )
         for key, vector in zip(keys, vectors):
             normalized = self._valid(vector)
-            if normalized is not None:
-                self.track_features[key].append(normalized)
-                accepted.append((key[1], normalized.copy()))
+            if normalized is None:
+                continue
+            gallery = self.track_features[key]
+            # Adaptive sampling: compare only with the last accepted view. Do not
+            # advance the reference when a near-duplicate is rejected.
+            if gallery and float(np.dot(normalized, gallery[-1])) >= duplicate_threshold:
+                continue
+            gallery.append(normalized)
+            accepted.append((key[1], normalized.copy()))
         return accepted
 
     @staticmethod
