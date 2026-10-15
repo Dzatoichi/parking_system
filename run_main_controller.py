@@ -607,8 +607,11 @@ def main() -> None:
                     if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
 
-                for dropped_track_id in transition_trackers[camera_id].detector.dropped_tracks:
-                    runtime_reid.forget_track(camera_id, int(dropped_track_id))
+                # Camera 1 is a trigger/registration camera and may not have a
+                # topology tracker at all. Only topology cameras expose dropped_tracks.
+                if camera_id in transition_trackers:
+                    for dropped_track_id in transition_trackers[camera_id].detector.dropped_tracks:
+                        runtime_reid.forget_track(camera_id, int(dropped_track_id))
 
                 stale_keys = [
                     key for key, last_seen in track_last_seen.items()
