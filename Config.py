@@ -110,6 +110,7 @@ class Config:
     RUNTIME_REID_DUPLICATE_THRESHOLD = float(os.getenv("PARKING_RUNTIME_REID_DUPLICATE_THRESHOLD", "0.90"))
     # Expire a handoff if no topology-eligible Re-ID match appears within this many target-camera frames.
     RUNTIME_REID_PENDING_TTL_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_PENDING_TTL_FRAMES", "900"))
+    SCAN_FIFO_TTL_FRAMES = int(os.getenv("PARKING_SCAN_FIFO_TTL_FRAMES", "900"))
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
     # 1 - мягкое затухание, большое число (например 99) - требуем совпадения строго подряд.
     CANDIDATE_MISS_PENALTY = 1
