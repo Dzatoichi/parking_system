@@ -35,7 +35,7 @@ REPORT_PATH = ROOT / "main_controller_run_report.json"
 SCAN_CAMERAS = (1, 2, 3)
 FEATURE_CAMERAS = SCAN_CAMERAS
 GALLERY_CAMERAS = (1, 2, 3)
-OCR_CAMERAS = (1,)
+OCR_CAMERAS = (1, 2)
 INFERENCE_DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
 
@@ -377,7 +377,13 @@ def main() -> None:
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
                         if cam == camera_id
                     }
-                    if camera_id in SCAN_CAMERAS and active_ids:
+                    # Display-state tracking must use actual polygon membership,
+                    # not active gallery IDs: galleries intentionally remain active
+                    # after a vehicle leaves the zone so sampling can continue.
+                    if camera_id in SCAN_CAMERAS and any(
+                        feature_managers[camera_id].is_in_zone(camera_id, bbox)
+                        for _tid, bbox in tracks
+                    ):
                         scan_zone_active_cameras.add(camera_id)
                     if camera_id == 2:
                         # FIFO is permitted only between the scan station and the
@@ -451,11 +457,16 @@ def main() -> None:
                             if key not in registered_tracks:
                                 start_registration(int(tid), frame_id)
                     if camera_id in OCR_CAMERAS and frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
-                        moving_tracks = [
+                        # OCR is attempted on the scan-zone cameras while the vehicle
+                        # anchor is actually inside its configured zone. Camera 2 can
+                        # recover a plate missed by camera 1; its FIFO binding is done
+                        # earlier in this frame, so votes attach to the correct journey.
+                        scan_zone_tracks = [
                             (int(tid), box) for tid, box in zip(ids, boxes)
                             if int(tid) in active_ids
+                            and feature_managers[camera_id].is_in_zone(camera_id, box)
                         ]
-                        for tid, reading in plate_ocr.recognize(frame, moving_tracks).items():
+                        for tid, reading in plate_ocr.recognize(frame, scan_zone_tracks).items():
                             if reading.ocr_confidence >= Config.OCR_MIN_CHAR_CONFIDENCE:
                                 plate_votes[(camera_id, int(tid))][reading.text].append(
                                     float(reading.ocr_confidence)
@@ -783,7 +794,9 @@ def main() -> None:
             # Maintain the dynamic visualization pool after all cameras update.
             # Camera 1 is permanent; scan cameras are included during collection;
             # the active route destination is independently added to the pool.
-            scan_view_active = bool(scan_pending or scan_zone_active_cameras)
+            # Do not use scan_pending here: an unmatched/duplicate FIFO item must
+            # not keep scan cameras visible after all vehicles have left the zones.
+            scan_view_active = bool(scan_zone_active_cameras)
             if scan_view_active:
                 visual_camera_pool.update(SCAN_CAMERAS)
             else:
