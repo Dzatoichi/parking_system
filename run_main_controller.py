@@ -151,11 +151,11 @@ def main() -> None:
         session_by_journey[journey_number] = session.session_id
         registration_started = True
         print(f"[REGISTER] journey={journey_number} camera=1 track={track_id} session={session.session_id}")
-        # Registration view: keep the three capture cameras and camera 4 visible
-        # as the first downstream/search camera. Each stream still has one owner.
+        # Match run_feature_capture: cameras 2 and 3 are opened only for the
+        # registration-capture phase. Downstream cameras (4-9) must NOT start
+        # until an EXIT crossing creates a concrete SEARCH_ON_CAMERA task.
         open_camera(2, frame_id)
         open_camera(3, frame_id)
-        open_camera(4, frame_id)
 
     def finish_gallery(camera_id: int, track_id: int, journey_number: int | None) -> None:
         if camera_id not in FEATURE_CAMERAS:
@@ -348,10 +348,9 @@ def main() -> None:
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
                 phase = (
-                    "SEARCH / DOWNSTREAM CAMERAS" if search_mode
-                    else "REGISTRATION + CAMERA 4 SEARCH VIEW" if registration_started
-                    else "WAITING FOR FEATURE ZONE"
-                )
+                    "REGISTRATION CAPTURE" if camera_id in FEATURE_CAMERAS
+                    else "NETWORK SEARCH TASK"
+                ) if registration_started else "WAITING FOR FEATURE ZONE"
                 cv2.putText(tile, f"CAM {camera_id} | {phase}", (10, 21),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
                 tiles[camera_id] = tile
@@ -394,19 +393,27 @@ def main() -> None:
                     # A handoff may have just opened its target; wait for its first frame.
                     continue
             ordered_ids = sorted(tiles)
-            columns = 3
-            cell_width, cell_height = TILE_SIZE
+            # Keep each camera tile at 16:9. Up to four cameras use the same
+            # 2x2 layout as run_feature_capture; larger sets use 3 columns.
+            columns = 2 if len(ordered_ids) <= 4 else 3
+            cell_width = 1280 // columns
+            cell_height = int(cell_width * 9 / 16)
+            blank = np.zeros((cell_height, cell_width, 3), dtype=np.uint8)
             rows = []
             for offset in range(0, len(ordered_ids), columns):
-                row_tiles = [tiles[cid] for cid in ordered_ids[offset:offset + columns]]
-                # Pad the last row so every row has the same width for vconcat.
+                row_tiles = [
+                    cv2.resize(tiles[cid], (cell_width, cell_height))
+                    for cid in ordered_ids[offset:offset + columns]
+                ]
                 while len(row_tiles) < columns:
-                    row_tiles.append(
-                        np.zeros((cell_height, cell_width, 3), dtype=np.uint8)
-                    )
+                    row_tiles.append(blank.copy())
                 rows.append(cv2.hconcat(row_tiles))
             if rows:
-                cv2.imshow(WINDOW_NAME, cv2.vconcat(rows))
+                grid = cv2.vconcat(rows)
+                # Match the actual grid dimensions instead of stretching it into
+                # a fixed 1280x720 window (which distorted the camera images).
+                cv2.resizeWindow(WINDOW_NAME, grid.shape[1], grid.shape[0])
+                cv2.imshow(WINDOW_NAME, grid)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
