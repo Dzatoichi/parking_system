@@ -261,6 +261,7 @@ def main() -> None:
             if display_camera_id not in captures:
                 display_camera_id = 1 if 1 in captures else min(captures)
                 print(f"[DISPLAY FOCUS] camera={display_camera_id} reason=focused_stream_unavailable")
+            scan_zone_active_cameras: set[int] = set()
             tiles: dict[int, np.ndarray] = {}
             # Snapshot avoids processing a newly opened stream twice in the same controller cycle.
             active_now = sorted(captures)
@@ -371,6 +372,8 @@ def main() -> None:
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
                         if cam == camera_id
                     }
+                    if camera_id in SCAN_CAMERAS and active_ids:
+                        scan_zone_active_cameras.add(camera_id)
                     if camera_id == 2:
                         # FIFO is permitted only between the scan station and the
                         # useful overview camera. It is never used on cameras 4-9.
@@ -749,9 +752,14 @@ def main() -> None:
                 )
                 cv2.putText(tile, f"CAM {camera_id} | {phase}", (10, 21),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-                # Render only the focused camera. Other active streams, including
-                # camera 1's trigger, continue to be processed above in this same loop.
-                if camera_id == display_camera_id:
+                # During active feature collection, show the scan station trio
+                # (whichever streams are currently open). Once scan collection ends,
+                # show only the current downstream search destination. Camera 1 keeps
+                # processing as the trigger even when it is not the displayed tile.
+                scan_view_active = bool(scan_pending or scan_zone_active_cameras)
+                if scan_view_active and camera_id in SCAN_CAMERAS:
+                    tiles[camera_id] = tile
+                elif not scan_view_active and camera_id == display_camera_id:
                     tiles[camera_id] = tile
                 frame_ids[camera_id] += 1
 
@@ -760,11 +768,13 @@ def main() -> None:
             # throughout; this changes focus only, not the processing state.
             downstream_tracks_active = any(camera_id != 1 for camera_id, _ in journey_by_track)
             search_tasks_pending = bool(scan_pending or any(pending_reid.values()))
+            scan_collection_active = bool(scan_zone_active_cameras or scan_pending)
             if (
                 display_camera_id != 1
                 and 1 in captures
                 and not downstream_tracks_active
                 and not search_tasks_pending
+                and not scan_collection_active
             ):
                 display_camera_id = 1
                 print("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
