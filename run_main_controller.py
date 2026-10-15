@@ -143,6 +143,7 @@ def main() -> None:
     movement_last_seen: dict[tuple[int, int], int] = {}
     track_last_seen: dict[tuple[int, int], int] = {}
     camera2_interior_seen: set[tuple[int, int]] = set()
+    camera2_feature_closed_tracks: set[tuple[int, int]] = set()
 
     def open_camera(camera_id: int, seek_seconds: float = 0.0) -> None:
         """Open a stream only when a trigger/search task needs it.
@@ -338,6 +339,11 @@ def main() -> None:
                             )
                         if is_moving:
                             moving_tracks.append((int(track_id), bbox))
+                    if camera_id == 2 and camera2_feature_closed_tracks:
+                        moving_tracks = [
+                            item for item in moving_tracks
+                            if (2, int(item[0])) not in camera2_feature_closed_tracks
+                        ]
                     sampled_embeddings = runtime_reid.update_camera(
                         camera_id, frame_id, frame, moving_tracks
                     )
@@ -412,6 +418,10 @@ def main() -> None:
                                     2, int(seen_track_id),
                                     journey_by_track.get(seen_key),
                                 )
+                                # Stop both scan-gallery and runtime Re-ID sampling
+                                # for this camera-local track after frame exit.
+                                camera2_feature_closed_tracks.add(seen_key)
+                                runtime_reid.forget_track(2, int(seen_track_id))
                                 camera2_interior_seen.discard(seen_key)
                                 print(
                                     f"[SCAN GALLERY CLOSED] camera=2 track={seen_track_id} "
@@ -653,6 +663,8 @@ def main() -> None:
                     registered_tracks.discard(stale_key)
                     plate_votes.pop(stale_key, None)
                     runtime_reid.forget_track(camera_id, stale_track_id)
+                    camera2_feature_closed_tracks.discard(stale_key)
+                    camera2_interior_seen.discard(stale_key)
                     movement_last_seen.pop(stale_key, None)
                     last_centers.pop(stale_key, None)
                     movement_scores.pop(stale_key, None)
