@@ -134,8 +134,7 @@ def main() -> None:
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
-    registration_started = False
-    registration_completed = False
+     registration_completed = False
     search_mode = False
     scan_pending: list[tuple[int, str, int]] = []
     last_centers: dict[tuple[int, int], tuple[float, float]] = {}
@@ -185,8 +184,7 @@ def main() -> None:
         return session_id if session and session["status"] == "active" else None
 
     def start_registration(track_id: int, frame_id: int) -> None:
-        nonlocal registration_started
-        key = (1, int(track_id))
+         key = (1, int(track_id))
         if key in registered_tracks:
             return
         session = sessions.register_entry(1, int(track_id), int(frame_id))
@@ -194,8 +192,7 @@ def main() -> None:
         registered_tracks.add(key)
         journey_by_track[key] = journey_number
         session_by_journey[journey_number] = session.session_id
-        registration_started = True
-        trigger_time = camera_times.get(1, 0.0)
+         trigger_time = camera_times.get(1, 0.0)
         # Registration trigger wakes only the three scan cameras. The remaining
         # cameras stay closed until a topology EXIT creates a search task.
         open_camera(2, trigger_time)
@@ -249,8 +246,8 @@ def main() -> None:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
         print(
-            f"[CONTROLLER] Lazy mode: camera 1 trigger skips {trigger_skip_frames - 1} "
-            "frames between trigger inferences; cameras 2-9 open only on demand. Q/Esc exits."
+            f"[CONTROLLER] Lazy mode: idle camera 1 skips {trigger_skip_frames - 1} "
+            "frames between trigger inferences; active journeys use every frame; cameras 2-9 open on demand. Q/Esc exits."
         )
 
         while captures:
@@ -261,9 +258,10 @@ def main() -> None:
                 if camera_id not in captures:
                     continue
                 cap = captures[camera_id]
-                # Before the first scan trigger, camera 1 is a lightweight detector:
-                # read every source frame but run tracking/inference only every Nth frame.
-                if camera_id == 1 and not registration_started and frame_ids[1] % trigger_skip_frames != 0:
+                # While no vehicle journey/search is active, camera 1 is a lightweight
+                # trigger: read every source frame but infer only every Nth frame.
+                system_busy = bool(journey_by_track or scan_pending or any(pending_reid.values()))
+                if camera_id == 1 and not system_busy and frame_ids[1] % trigger_skip_frames != 0:
                     ok, _skipped_raw = cap.read()
                     if not ok:
                         cap.release()
