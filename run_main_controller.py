@@ -627,8 +627,6 @@ def main() -> None:
                     for line in network.camera(camera_id).lines:
                         p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
                         cv2.line(display, p1, p2, (0, 0, 255), 2)
-                    p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
-                    cv2.line(display, p1, p2, (0, 0, 255), 2)
 
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
