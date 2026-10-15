@@ -87,17 +87,19 @@ class RuntimeReID:
         return accepted
 
     @staticmethod
-    def _score(track_features, identity_features) -> float:
+    def _similarity_scores(track_features, identity_features) -> tuple[float, float]:
+        """Return (best pairwise cosine similarity, mean of top-k similarities)."""
         if not track_features or not identity_features:
-            return -1.0
+            return -1.0, -1.0
         a = np.asarray(track_features, dtype=np.float32)
         b = np.asarray(identity_features, dtype=np.float32)
         if a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[1]:
-            return -1.0
-        similarities = a @ b.T
-        flat = similarities.reshape(-1)
+            return -1.0, -1.0
+        flat = (a @ b.T).reshape(-1)
+        best = float(np.max(flat))
         k = min(max(1, int(getattr(Config, "MATCH_SIM_TOPK", 5))), flat.size)
-        return float(np.partition(flat, flat.size - k)[-k:].mean())
+        mean_topk = float(np.partition(flat, flat.size - k)[-k:].mean())
+        return best, mean_topk
 
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
         camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
@@ -117,16 +119,22 @@ class RuntimeReID:
                 self._last_match_log_state[log_key] = state
             return None
 
-        score = self._score(track_features, gallery)
+        best_score, mean_topk_score = self._similarity_scores(track_features, gallery)
+        # The decision uses the single best embedding pair, as requested.
+        score = best_score
         self.last_scores[(camera_id, track_id)] = (journey_id, score)
         result = "ACCEPT" if score >= self.threshold else "REJECT"
         # Feature counts change only when a new appearance sample is accepted, so
         # this prints useful score updates without flooding the log every frame.
-        state = (len(track_features), len(gallery), round(float(score), 3), result)
+        state = (
+            len(track_features), len(gallery), round(float(best_score), 3),
+            round(float(mean_topk_score), 3), result
+        )
         if self._last_match_log_state.get(log_key) != state:
             print(
                 f"[REID SIM] camera={camera_id} track={track_id} journey={journey_id} "
-                f"sim={score:.3f} threshold={self.threshold:.3f} "
+                f"best_sim={best_score:.3f} mean_topk_sim={mean_topk_score:.3f} "
+                f"threshold={self.threshold:.3f} "
                 f"track_features={len(track_features)} journey_features={len(gallery)} "
                 f"result={result}"
             )
