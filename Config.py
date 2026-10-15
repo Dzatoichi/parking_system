@@ -98,6 +98,7 @@ class Config:
     MATCH_SIM_TOPK = 5
     # Число tracklet'ов в одном матричном батче Matcher (ограничивает память).
     MATCH_TRACKLET_BATCH_SIZE = 32
+    MATCH_VEHICLE_BATCH_SIZE = 32
     # Сколько разных по времени эмбеддингов хранить в текущем tracklet.
     TRACKLET_MAX_FEATURES = 5
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
