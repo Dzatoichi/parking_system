@@ -119,7 +119,6 @@ def main() -> None:
     # Labels describe a journey, not a camera-local BoT-SORT ID.
     journey_by_track: dict[tuple[int, int], int] = {}
     session_by_journey: dict[int, str] = {}
-    waiting: dict[tuple[int, int], list[tuple[int, str | None]]] = defaultdict(list)
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -406,16 +405,15 @@ def main() -> None:
                         session_id = session_for_journey(journey_number)
                         pair = (command.source_camera, command.camera_id)
                         finish_gallery(command.source_camera, command.track_id, journey_number)
-                        # FIFO is retained only inside the configured scan zone (1-3).
-                        # All other handoffs become topology-scoped Re-ID tasks.
-                        if command.source_camera in FEATURE_CAMERAS and command.camera_id in FEATURE_CAMERAS:
-                            waiting[pair].append((journey_number, session_id))
-                        else:
-                            if command.source_camera not in FEATURE_CAMERAS:
-                                runtime_reid.extend_identity(
-                                    journey_number, command.source_camera, command.track_id
-                                )
-                            pending_reid[pair].append((journey_number, frame_ids.get(command.camera_id, 0)))
+                        # Camera 1 is excluded above. Every actual network handoff
+                        # (cameras 2-9) must pass topology eligibility AND Re-ID.
+                        if command.source_camera not in GALLERY_CAMERAS:
+                            runtime_reid.extend_identity(
+                                journey_number, command.source_camera, command.track_id
+                            )
+                        pending_reid[pair].append(
+                            (journey_number, frame_ids.get(command.camera_id, 0))
+                        )
                         if database is not None:
                             database.record_event(
                                 command.source_camera, command.track_id, command.frame_id,
@@ -448,29 +446,12 @@ def main() -> None:
                         # Target stream is already active; never start/seek it on a handoff.
 
                     elif command.type is CommandType.MARK_ARRIVED:
-                        pair = (command.source_camera, command.camera_id)
-                        if command.source_camera in FEATURE_CAMERAS and command.camera_id in FEATURE_CAMERAS:
-                            queue = waiting.get(pair, [])
-                            if queue:
-                                journey_number, session_id = queue.pop(0)
-                                journey_by_track[(command.camera_id, int(command.track_id))] = journey_number
-                                if session_id:
-                                    current = sessions.get_session(session_id)
-                                    if current and current["status"] == "active":
-                                        try:
-                                            sessions.bind_track(session_id, command.camera_id, command.track_id)
-                                        except (KeyError, ValueError) as exc:
-                                            print(f"[SESSION BIND WARNING] {exc}")
-                                print(
-                                    f"[SCAN FIFO] journey={journey_number} "
-                                    f"{command.source_camera}->{command.camera_id} "
-                                    f"local_track={command.track_id}"
-                                )
-                        else:
-                            print(
-                                f"[REID CANDIDATE GATE] {command.source_camera}->{command.camera_id} "
-                                f"local_track={command.track_id}; waiting for appearance match"
-                            )
+                        # ENTER merely makes this local track eligible for the source
+                        # camera's pending task. Identity assignment happens below via Re-ID.
+                        print(
+                            f"[REID CANDIDATE GATE] {command.source_camera}->{command.camera_id} "
+                            f"local_track={command.track_id}; waiting for moving-track appearance match"
+                        )
 
                 # Resolve only topology-eligible destination tracks against pending journeys.
                 # A target track must have crossed an ENTER line from this exact source camera.
