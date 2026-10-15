@@ -506,10 +506,8 @@ def main() -> None:
                         if journey_id in used_journeys or candidate_id in used_tracks:
                             continue
                         journey_by_track[(camera_id, candidate_id)] = journey_id
-                        runtime_reid.extend_identity(journey_id, camera_id, candidate_id)
-                        if database is not None:
-                            for vector in runtime_reid.track_features.get((camera_id, candidate_id), []):
-                                database.save_embedding(journey_id, camera_id, candidate_id, frame_id, vector)
+                        # Its scan-zone gallery is merged at EXIT by finish_gallery(),
+                        # avoiding duplicate vectors in the identity gallery.
                         session_id = session_by_journey.get(journey_id)
                         if session_id:
                             current = sessions.get_session(session_id)
