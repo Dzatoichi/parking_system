@@ -20,6 +20,7 @@ class ParkingRepository:
     def __init__(self, params: dict | None = None):
         self.params = dict(params or Config.DB_PARAMS)
         self.connection = None
+        self._pending_embeddings: list[tuple] = []
 
     def connect(self) -> None:
         if self.connection is not None and not self.connection.closed:
@@ -30,7 +31,29 @@ class ParkingRepository:
 
     def close(self) -> None:
         if self.connection is not None and not self.connection.closed:
+            self.flush_embeddings()
             self.connection.close()
+
+    def flush_embeddings(self) -> None:
+        if not self._pending_embeddings:
+            return
+        if self.connection is None or self.connection.closed:
+            self.connect()
+        rows, self._pending_embeddings = self._pending_embeddings, []
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.executemany(
+                    """INSERT INTO parking_embedding
+                       (global_id,camera_id,local_track_id,frame_id,embedding,mirrored)
+                       VALUES (%s,%s,%s,%s,%s,%s)""",
+                    rows,
+                )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            self._pending_embeddings = rows + self._pending_embeddings
+            logger.exception("Failed to flush buffered Re-ID embeddings")
+            raise
 
     def _run(self, sql: str, params: tuple = (), *, fetch: bool = False):
         if self.connection is None or self.connection.closed:
@@ -164,15 +187,15 @@ class ParkingRepository:
         if norm <= 1e-12:
             return
         normalized = (values / norm).astype(float).tolist()
-        self._run(
-            """INSERT INTO parking_embedding
-               (global_id,camera_id,local_track_id,frame_id,embedding,mirrored)
-               VALUES (%s,%s,%s,%s,%s,%s)""",
+        self._pending_embeddings.append(
             (int(global_id), int(camera_id), int(local_track_id), int(frame_id),
-             Json(normalized), bool(mirrored)),
+             Json(normalized), bool(mirrored))
         )
+        if len(self._pending_embeddings) >= 100:
+            self.flush_embeddings()
 
     def load_embeddings(self, global_id: int) -> list[dict[str, Any]]:
+        self.flush_embeddings()
         if self.connection is None or self.connection.closed:
             self.connect()
         try:
