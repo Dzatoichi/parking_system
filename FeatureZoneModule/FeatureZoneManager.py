@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import yaml
 
+from Config import Config
+
 @dataclass
 class TrackGallery:
     """Embeddings for one local track observation."""
@@ -28,7 +30,8 @@ class FeatureZoneManager:
     """
     def __init__(self, features_manager, config_path: str | Path = "feature_zones.yaml",
                  similarity_threshold: float | None = None,
-                 sample_every_n_frames: int | None = None, min_crop_size: int | None = None):
+                 sample_every_n_frames: int | None = None, min_crop_size: int | None = None,
+                 max_samples_per_track: int | None = None):
         self.features_manager = features_manager
         with open(config_path, "r", encoding="utf-8") as stream:
             self.config = yaml.safe_load(stream) or {}
@@ -39,9 +42,13 @@ class FeatureZoneManager:
             raise ValueError("similarity_threshold must be between 0 and 1")
         if interval < 1:
             raise ValueError("sample_every_n_frames must be >= 1")
+        max_samples = Config.FEATURE_GALLERY_MAX_SAMPLES if max_samples_per_track is None else max_samples_per_track
         if crop_size < 1:
             raise ValueError("min_crop_size must be >= 1")
+        if max_samples < 1:
+            raise ValueError("max_samples_per_track must be >= 1")
         self.similarity_threshold, self.sample_every_n_frames, self.min_crop_size = float(threshold), int(interval), int(crop_size)
+        self.max_samples_per_track = int(max_samples)
         self._galleries: dict[tuple[int, int], TrackGallery] = {}
         # Latest comparison against the last accepted ORIGINAL embedding, per local track.
         # Kept between sampling frames so the UI can display it beneath the bbox.
@@ -130,6 +137,9 @@ class FeatureZoneManager:
                 continue
             if gallery.last_sample_frame == frame_id:
                 continue
+            # Bound per-observation memory and avoid extracting embeddings after the gallery is full.
+            if len(gallery.original) >= self.max_samples_per_track:
+                continue
             x1, y1, x2, y2 = map(int, visible[track_id])
             x1, x2 = max(0, x1), min(w, x2)
             y1, y2 = max(0, y1), min(h, y2)
@@ -157,7 +167,12 @@ class FeatureZoneManager:
             gallery = self._galleries[(camera_id, track_id)]
             gallery.last_sample_frame = int(frame_id)
             if gallery.original:
-                similarity = float(self.features_manager.calculate_similarity(original, gallery.original[-1]))
+                # Compare with the whole accepted gallery, not only the last sample:
+                # a repeated view can recur after a different intermediate view.
+                similarity = max(
+                    float(self.features_manager.calculate_similarity(original, sample))
+                    for sample in gallery.original
+                )
                 cosine_distance = 1.0 - similarity
                 self.last_comparison_by_track[track_id] = {
                     "cosine_similarity": similarity,
