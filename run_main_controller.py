@@ -133,6 +133,7 @@ def main() -> None:
     movement_scores: dict[tuple[int, int], float] = {}
     movement_state: dict[tuple[int, int], bool] = {}
     movement_last_seen: dict[tuple[int, int], int] = {}
+    track_last_seen: dict[tuple[int, int], int] = {}
 
     def open_camera(camera_id: int, seek_frame: int = 0) -> None:
         if camera_id in captures or camera_id in ended:
@@ -251,6 +252,8 @@ def main() -> None:
                 )[0]
                 boxes, ids, tracks = unpack_tracks(result)
                 visible_ids = [int(tid) for tid in ids]
+                for visible_track_id in visible_ids:
+                    track_last_seen[(camera_id, int(visible_track_id))] = frame_id
                 sampled_embeddings = []
                 moving_tracks = []
                 if camera_id != 1:
@@ -545,14 +548,31 @@ def main() -> None:
                     runtime_reid.forget_track(camera_id, int(dropped_track_id))
 
                 stale_keys = [
-                    key for key, last_seen in movement_last_seen.items()
+                    key for key, last_seen in track_last_seen.items()
                     if key[0] == camera_id and frame_id - last_seen > Config.TRANSITION_FORGET_FRAMES
                 ]
                 for stale_key in stale_keys:
+                    stale_track_id = stale_key[1]
+                    global_id = journey_by_track.get(stale_key)
+                    if camera_id in GALLERY_CAMERAS and global_id is not None:
+                        finish_gallery(camera_id, stale_track_id, global_id)
+                    elif camera_id == 1:
+                        feature_managers[1].end_track(1, stale_track_id)
+                    journey_by_track.pop(stale_key, None)
+                    track_last_seen.pop(stale_key, None)
+                    registered_tracks.discard(stale_key)
+                    plate_votes.pop(stale_key, None)
+                    runtime_reid.forget_track(camera_id, stale_track_id)
                     movement_last_seen.pop(stale_key, None)
                     last_centers.pop(stale_key, None)
                     movement_scores.pop(stale_key, None)
                     movement_state.pop(stale_key, None)
+                    if camera_id == 1:
+                        sessions.release_camera1_track(stale_track_id)
+                    if camera_id == 2:
+                        completed = sessions.finish_on_camera2_track_lost(stale_track_id)
+                        if completed:
+                            registration_completed = True
 
                 # Keep feature gallery closure in sync if the track was lost without an EXIT.
                 if camera_id in FEATURE_CAMERAS:
