@@ -170,79 +170,91 @@ class Matcher:
         vehicles: Dict[int, list[np.ndarray]],
         tracklets: Dict[int, Tracklet],
     ) -> list[tuple[int, Tracklet]]:
-        """Return one-to-one matches using bounded, vectorized cosine comparisons."""
+        """Batch cosine comparisons while bounding temporary gallery memory."""
         if not vehicles or not tracklets:
             return []
 
-        gallery_vectors = []
-        gallery_vehicle_ids = []
-        gallery_by_vehicle = {}
+        valid_tracklets = []
         feature_dim = None
-
-        for vehicle_id, features in vehicles.items():
-            if features is None or len(features) == 0:
+        for tracklet in tracklets.values():
+            if not tracklet.features:
                 continue
-            matrix = self._normalize(features)
+            matrix = self._normalize(tracklet.features)
             if matrix.size == 0:
                 continue
             if feature_dim is None:
                 feature_dim = matrix.shape[1]
             if matrix.shape[1] != feature_dim:
                 logger.warning(
-                    "Skipping vehicle %s: gallery dimension %s != expected %s",
-                    vehicle_id, matrix.shape[1], feature_dim,
+                    "Skipping tracklet camera=%s track=%s: inconsistent feature dimension",
+                    tracklet.cam_id, tracklet.track_id,
                 )
                 continue
-            start = len(gallery_vectors)
-            gallery_vectors.extend(matrix)
-            gallery_vehicle_ids.extend([vehicle_id] * len(matrix))
-            gallery_by_vehicle[vehicle_id] = (start, len(gallery_vectors))
-
-        if not gallery_vectors:
-            return []
-
-        gallery_matrix = np.asarray(gallery_vectors, dtype=np.float32)
-        gallery_vehicle_ids = np.asarray(gallery_vehicle_ids)
-        valid_tracklets = []
-        for tracklet in tracklets.values():
-            if not tracklet.features:
-                continue
-            matrix = self._normalize(tracklet.features)
-            if matrix.size and matrix.shape[1] == feature_dim:
-                valid_tracklets.append((tracklet, matrix))
-            elif matrix.size:
-                logger.warning(
-                    "Skipping tracklet camera=%s track=%s: feature dimension %s != gallery %s",
-                    tracklet.cam_id, tracklet.track_id, matrix.shape[1], feature_dim,
-                )
+            valid_tracklets.append((tracklet, matrix))
 
         if not valid_tracklets:
             return []
 
+        # Normalize each car's gallery once. Keep galleries separate so a large
+        # fleet does not create one enormous concatenated embedding matrix.
+        galleries = {}
+        for vehicle_id, features in vehicles.items():
+            if features is None or len(features) == 0:
+                continue
+            matrix = self._normalize(features)
+            if matrix.size == 0:
+                continue
+            if matrix.shape[1] != feature_dim:
+                logger.warning(
+                    "Skipping vehicle %s: gallery dimension %s != tracklet dimension %s",
+                    vehicle_id, matrix.shape[1], feature_dim,
+                )
+                continue
+            galleries[vehicle_id] = matrix
+
+        if not galleries:
+            return []
+
+        tracklet_batch_size = max(1, int(getattr(Config, "MATCH_TRACKLET_BATCH_SIZE", 32)))
+        vehicle_batch_size = max(1, int(getattr(Config, "MATCH_VEHICLE_BATCH_SIZE", 32)))
+        vehicle_items = list(galleries.items())
         candidates = []
-        chunk_size = max(1, int(getattr(Config, "MATCH_TRACKLET_BATCH_SIZE", 32)))
-        for offset in range(0, len(valid_tracklets), chunk_size):
-            chunk = valid_tracklets[offset:offset + chunk_size]
+
+        for track_offset in range(0, len(valid_tracklets), tracklet_batch_size):
+            track_chunk = valid_tracklets[track_offset:track_offset + tracklet_batch_size]
             flat_features = []
             row_owner = []
-            for local_idx, (_, matrix) in enumerate(chunk):
+            for local_idx, (_, matrix) in enumerate(track_chunk):
                 flat_features.extend(matrix)
                 row_owner.extend([local_idx] * len(matrix))
-
-            # The largest temporary matrix is bounded by chunk_size * features_per_track * gallery_size.
-            similarities = np.asarray(flat_features, dtype=np.float32) @ gallery_matrix.T
+            track_matrix = np.asarray(flat_features, dtype=np.float32)
             row_owner = np.asarray(row_owner, dtype=np.int32)
 
-            for local_idx, (tracklet, matrix) in enumerate(chunk):
-                rows = np.flatnonzero(row_owner == local_idx)
-                for vehicle_id, (start, end) in gallery_by_vehicle.items():
-                    score = self._aggregate(similarities[np.ix_(rows, np.arange(start, end))])
-                    logger.debug(
-                        "Re-ID score vehicle=%s camera=%s track=%s score=%.4f",
-                        vehicle_id, tracklet.cam_id, tracklet.track_id, score,
-                    )
-                    if score >= self.similarity_threshold:
-                        candidates.append((vehicle_id, tracklet, score))
+            for vehicle_offset in range(0, len(vehicle_items), vehicle_batch_size):
+                vehicle_chunk = vehicle_items[vehicle_offset:vehicle_offset + vehicle_batch_size]
+                flat_gallery = []
+                gallery_slices = {}
+                cursor = 0
+                for vehicle_id, gallery in vehicle_chunk:
+                    flat_gallery.extend(gallery)
+                    gallery_slices[vehicle_id] = (cursor, cursor + len(gallery))
+                    cursor += len(gallery)
+
+                gallery_matrix = np.asarray(flat_gallery, dtype=np.float32)
+                similarities = track_matrix @ gallery_matrix.T
+
+                for local_idx, (tracklet, _) in enumerate(track_chunk):
+                    rows = np.flatnonzero(row_owner == local_idx)
+                    for vehicle_id, (column_start, column_end) in gallery_slices.items():
+                        score = self._aggregate(
+                            similarities[np.ix_(rows, np.arange(column_start, column_end))]
+                        )
+                        logger.debug(
+                            "Re-ID score vehicle=%s camera=%s track=%s score=%.4f",
+                            vehicle_id, tracklet.cam_id, tracklet.track_id, score,
+                        )
+                        if score >= self.similarity_threshold:
+                            candidates.append((vehicle_id, tracklet, score))
 
         # Greedy one-to-one assignment prevents a gallery or tracklet being claimed twice.
         candidates.sort(key=lambda item: item[2], reverse=True)
