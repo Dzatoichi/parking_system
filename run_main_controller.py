@@ -132,7 +132,7 @@ def main() -> None:
     last_centers: dict[tuple[int, int], tuple[float, float]] = {}
     movement_scores: dict[tuple[int, int], float] = {}
     movement_state: dict[tuple[int, int], bool] = {}
-    previous_movement_state: dict[tuple[int, int], bool] = {}
+    movement_last_seen: dict[tuple[int, int], int] = {}
 
     def open_camera(camera_id: int, seek_frame: int = 0) -> None:
         if camera_id in captures or camera_id in ended:
@@ -260,12 +260,26 @@ def main() -> None:
                         object_size = max(1.0, ((x2 - x1) + (y2 - y1)) / 2.0)
                         key = (camera_id, int(track_id))
                         previous = last_centers.get(key)
-                        score = 0.0 if previous is None else (
-                            ((center[0] - previous[0]) ** 2 + (center[1] - previous[1]) ** 2) ** 0.5
-                        ) / object_size
-                        last_centers[key] = center
+                        if previous is None:
+                            smoothed_center = center
+                            score = 0.0
+                        else:
+                            alpha = float(Config.TRACKER_MOVEMENT_ALFA)
+                            smoothed_center = (
+                                alpha * center[0] + (1.0 - alpha) * previous[0],
+                                alpha * center[1] + (1.0 - alpha) * previous[1],
+                            )
+                            score = (
+                                ((smoothed_center[0] - previous[0]) ** 2
+                                 + (smoothed_center[1] - previous[1]) ** 2) ** 0.5
+                            ) / object_size
+                        last_centers[key] = smoothed_center
                         movement_scores[key] = score
-                        is_moving = score >= Config.TRACKER_MOVEMENT_THRESHOLD
+                        movement_last_seen[key] = frame_id
+                        is_moving = (
+                            object_size >= Config.TRACKER_MOVEMENT_MIN_SIZE
+                            and score >= Config.TRACKER_MOVEMENT_THRESHOLD
+                        )
                         old_state = movement_state.get(key)
                         movement_state[key] = is_moving
                         if old_state is not None and old_state != is_moving and database is not None:
@@ -479,6 +493,8 @@ def main() -> None:
                     for candidate_id in candidate_ids:
                         if (camera_id, int(candidate_id)) in journey_by_track:
                             continue
+                        if not movement_state.get((camera_id, int(candidate_id)), False):
+                            continue
                         for journey_id in journey_ids:
                             score = runtime_reid.match_track_to_journey(
                                 camera_id, int(candidate_id), int(journey_id)
@@ -490,6 +506,10 @@ def main() -> None:
                         if journey_id in used_journeys or candidate_id in used_tracks:
                             continue
                         journey_by_track[(camera_id, candidate_id)] = journey_id
+                        runtime_reid.extend_identity(journey_id, camera_id, candidate_id)
+                        if database is not None:
+                            for vector in runtime_reid.track_features.get((camera_id, candidate_id), []):
+                                database.save_embedding(journey_id, camera_id, candidate_id, frame_id, vector)
                         session_id = session_by_journey.get(journey_id)
                         if session_id:
                             current = sessions.get_session(session_id)
@@ -525,6 +545,16 @@ def main() -> None:
 
                 for dropped_track_id in transition_trackers[camera_id].detector.dropped_tracks:
                     runtime_reid.forget_track(camera_id, int(dropped_track_id))
+
+                stale_keys = [
+                    key for key, last_seen in movement_last_seen.items()
+                    if key[0] == camera_id and frame_id - last_seen > Config.TRANSITION_FORGET_FRAMES
+                ]
+                for stale_key in stale_keys:
+                    movement_last_seen.pop(stale_key, None)
+                    last_centers.pop(stale_key, None)
+                    movement_scores.pop(stale_key, None)
+                    movement_state.pop(stale_key, None)
 
                 # Keep feature gallery closure in sync if the track was lost without an EXIT.
                 if camera_id in FEATURE_CAMERAS:
