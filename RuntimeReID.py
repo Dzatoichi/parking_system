@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections import defaultdict
 import logging
 
-import cv2
 import numpy as np
 
 from Config import Config
