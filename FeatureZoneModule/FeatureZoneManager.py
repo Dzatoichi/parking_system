@@ -45,6 +45,10 @@ class FeatureZoneManager:
             raise ValueError("min_crop_size must be >= 1")
         self.similarity_threshold, self.sample_every_n_frames, self.min_crop_size = float(threshold), int(interval), int(crop_size)
         self._galleries: dict[tuple[int, int], TrackGallery] = {}
+        # Tracks explicitly closed (e.g. camera-2 frame exit) cannot reactivate
+        # while the tracker still reports them. They become eligible again only
+        # after disappearing from the visible track set.
+        self._closed_tracks: set[tuple[int, int]] = set()
         # Latest comparison against the last accepted ORIGINAL embedding, per local track.
         # Kept between sampling frames so the UI can display it beneath the bbox.
         self.last_comparison_by_track: dict[int, dict[str, float]] = {}
@@ -119,11 +123,18 @@ class FeatureZoneManager:
         # feature-sampling frame, so frame skipping cannot silently miss activation.
         visible: dict[int, tuple[float, float, float, float]] = {}
         for track_id, bbox in tracks:
-            track_id = int(track_id)
-            box = tuple(map(float, bbox))
-            visible[track_id] = box
+            visible[int(track_id)] = tuple(map(float, bbox))
+
+        # A closed track may only be re-armed after it is no longer visible;
+        # this prevents a boundary-touching track from opening a fresh gallery
+        # on every subsequent frame.
+        self._closed_tracks = {
+            key for key in self._closed_tracks
+            if key[0] != camera_id or key[1] in visible
+        }
+        for track_id, box in visible.items():
             key = (camera_id, track_id)
-            if key not in self._galleries:
+            if key not in self._galleries and key not in self._closed_tracks:
                 profile = self._matching_profile(camera_id, box)
                 if profile is not None:
                     self._galleries[key] = TrackGallery(camera_id, track_id, profile)
@@ -198,7 +209,10 @@ class FeatureZoneManager:
 
     def end_track(self, camera_id: int, track_id: int) -> dict[str, Any] | None:
         camera_id, track_id = int(camera_id), int(track_id)
-        gallery = self._galleries.pop((camera_id, track_id), None)
+        key = (camera_id, track_id)
+        gallery = self._galleries.pop(key, None)
+        if gallery is not None:
+            self._closed_tracks.add(key)
         # Track IDs can be reused after a gallery closes; don't show stale
         # similarity metrics for a future track with the same local ID.
         if not any(existing_track_id == track_id for _, existing_track_id in self._galleries):
