@@ -677,9 +677,17 @@ def main() -> None:
         cv2.destroyAllWindows()
         for camera_id, manager in feature_managers.items():
             for (cam, track_id), gallery in manager.close_all().items():
+                global_id = journey_by_track.get((cam, track_id))
+                sample_count = len(gallery.get("original", [])) + len(gallery.get("flipped", []))
+                if global_id is not None and cam in GALLERY_CAMERAS:
+                    runtime_reid.add_identity_gallery(global_id, gallery)
+                    if database is not None:
+                        for mirrored, key_name in ((False, "original"), (True, "flipped")):
+                            for vector in gallery.get(key_name, []):
+                                database.save_embedding(global_id, cam, track_id, frame_ids.get(cam, 0), vector, mirrored)
                 print(
                     f"[SHUTDOWN GALLERY] camera={cam} track={track_id} "
-                    f"samples={len(gallery.get('original', [])) + len(gallery.get('flipped', []))}"
+                    f"samples={sample_count} global_id={global_id if global_id is not None else '-'}"
                 )
         plate_summary = {
             str(journey_id): {
