@@ -144,6 +144,9 @@ def main() -> None:
     track_last_seen: dict[tuple[int, int], int] = {}
     camera2_interior_seen: set[tuple[int, int]] = set()
     camera2_feature_closed_tracks: set[tuple[int, int]] = set()
+    # Camera 1 keeps running as the registration trigger; the UI follows the
+    # current downstream search destination without stopping background processing.
+    display_camera_id = 1
 
     def open_camera(camera_id: int, seek_seconds: float = 0.0) -> None:
         """Open a stream only when a trigger/search task needs it.
@@ -253,6 +256,11 @@ def main() -> None:
         )
 
         while captures:
+            # If the focused route stream ended, return the display to the trigger
+            # (or the next available stream) while continuing the controller loop.
+            if display_camera_id not in captures:
+                display_camera_id = 1 if 1 in captures else min(captures)
+                print(f"[DISPLAY FOCUS] camera={display_camera_id} reason=focused_stream_unavailable")
             tiles: dict[int, np.ndarray] = {}
             # Snapshot avoids processing a newly opened stream twice in the same controller cycle.
             active_now = sorted(captures)
@@ -496,6 +504,13 @@ def main() -> None:
                         # destination camera, aligned to the source video's timestamp.
                         target_time = camera_times.get(command.source_camera, 0.0)
                         open_camera(command.camera_id, target_time)
+                        if command.camera_id in captures:
+                            display_camera_id = command.camera_id
+                            print(
+                                f"[DISPLAY FOCUS] camera={display_camera_id} "
+                                f"reason=search_handoff from={command.source_camera} "
+                                f"journey={journey_number}"
+                            )
                         finish_gallery(command.source_camera, command.track_id, journey_number)
                         # Camera 1 has no topology transitions. Every actual network handoff
                         # (cameras 2-9) must pass topology eligibility AND Re-ID.
@@ -734,7 +749,10 @@ def main() -> None:
                 )
                 cv2.putText(tile, f"CAM {camera_id} | {phase}", (10, 21),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-                tiles[camera_id] = tile
+                # Render only the focused camera. Other active streams, including
+                # camera 1's trigger, continue to be processed above in this same loop.
+                if camera_id == display_camera_id:
+                    tiles[camera_id] = tile
                 frame_ids[camera_id] += 1
 
             if not tiles:
@@ -748,27 +766,11 @@ def main() -> None:
                     break
                 continue
 
-            # Display only streams that are currently active; inactive cameras stay closed.
+            # The focused camera fills the window; all other active streams remain
+            # live in the processing loop but are not shown in the feature-collection view.
             ordered_ids = sorted(tiles)
-            # Keep each camera tile at 16:9. Up to four cameras use the same
-            # 2x2 layout as run_feature_capture; larger sets use 3 columns.
-            columns = 2 if len(ordered_ids) <= 4 else 3
-            cell_width = 1280 // columns
-            cell_height = int(cell_width * 9 / 16)
-            blank = np.zeros((cell_height, cell_width, 3), dtype=np.uint8)
-            rows = []
-            for offset in range(0, len(ordered_ids), columns):
-                row_tiles = [
-                    cv2.resize(tiles[cid], (cell_width, cell_height))
-                    for cid in ordered_ids[offset:offset + columns]
-                ]
-                while len(row_tiles) < columns:
-                    row_tiles.append(blank.copy())
-                rows.append(cv2.hconcat(row_tiles))
-            if rows:
-                grid = cv2.vconcat(rows)
-                # Match the actual grid dimensions instead of stretching it into
-                # a fixed 1280x720 window (which distorted the camera images).
+            if ordered_ids:
+                grid = tiles[ordered_ids[0]]
                 cv2.resizeWindow(WINDOW_NAME, grid.shape[1], grid.shape[0])
                 cv2.imshow(WINDOW_NAME, grid)
             key = cv2.waitKey(1) & 0xFF
