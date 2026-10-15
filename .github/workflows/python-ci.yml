@@ -1,0 +1,29 @@
+name: Python controller checks
+
+on:
+  push:
+    branches: [feature-candidate-search-v1]
+  pull_request:
+    branches: [feature-candidate-search-v1]
+  workflow_dispatch:
+
+jobs:
+  syntax-and-runtime-reid-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install lightweight test dependency
+        run: python -m pip install --upgrade pip numpy
+      - name: Compile changed runtime files
+        run: >-
+          python -m py_compile
+          run_main_controller.py
+          RuntimeReID.py
+          DB/parking_repository.py
+          FeatureZoneModule/FeatureZoneManager.py
+          Config.py
+      - name: Test runtime Re-ID logic
+        run: python -m unittest discover -s tests -p "test_runtime_reid.py" -v
