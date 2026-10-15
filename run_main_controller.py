@@ -136,7 +136,7 @@ def main() -> None:
     feature_closed = Counter()
     registration_completed = False
     search_mode = False
-    scan_pending: list[tuple[int, str, int]] = []
+    scan_pending: list[tuple[int, str, int, str]] = []
     last_centers: dict[tuple[int, int], tuple[float, float]] = {}
     movement_scores: dict[tuple[int, int], float] = {}
     movement_state: dict[tuple[int, int], bool] = {}
