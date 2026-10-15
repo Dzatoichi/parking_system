@@ -175,6 +175,34 @@ class FeatureZoneManagerTests(unittest.TestCase):
         self.assertEqual(completed[7]["sample_count"], 1)
         self.assertEqual(manager.active_track_keys(), ())
 
+    def test_closed_gallery_does_not_reopen_until_track_disappears(self):
+        fm = FakeFeaturesManager([
+            np.array([1., 0.]), np.array([0., 1.]),
+            np.array([0., 1.]), np.array([1., 0.]),
+        ])
+        manager = self.make_manager(fm)
+        frame = np.ones((100, 100, 3), dtype=np.uint8)
+        self.assertEqual(
+            manager.process_frame(1, 0, frame, [(7, [10, 10, 50, 50])]),
+            {7: True},
+        )
+        self.assertIsNotNone(manager.end_track(1, 7))
+
+        # The same visible track must not silently start a fresh gallery.
+        self.assertEqual(
+            manager.process_frame(1, 1, frame, [(7, [10, 10, 50, 50])]),
+            {},
+        )
+        self.assertEqual(len(fm.batches), 1)
+
+        # Once the track disappears, a later reuse of its local ID can activate.
+        manager.process_frame(1, 2, frame, [])
+        self.assertEqual(
+            manager.process_frame(1, 3, frame, [(7, [10, 10, 50, 50])]),
+            {7: True},
+        )
+        self.assertEqual(len(fm.batches), 2)
+
     def test_end_track_is_scoped_to_camera_and_track(self):
         fm = FakeFeaturesManager([np.array([1., 0.]), np.array([0., 1.])])
         manager = self.make_manager(fm)
