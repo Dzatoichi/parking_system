@@ -358,31 +358,6 @@ def main() -> None:
                         if cam == camera_id
                     }
                     if camera_id == 2:
-                        # End the camera-2 scan gallery when a previously in-frame
-                        # track reaches the image boundary. This is independent of
-                        # topology EXIT lines: leaving the video frame must stop
-                        # feature sampling even if no transition line was crossed.
-                        frame_h, frame_w = frame.shape[:2]
-                        for seen_track_id, seen_bbox in tracks:
-                            seen_key = (2, int(seen_track_id))
-                            sx1, sy1, sx2, sy2 = map(float, seen_bbox)
-                            touches_edge = (
-                                sx1 <= 1.0 or sy1 <= 1.0
-                                or sx2 >= frame_w - 2.0 or sy2 >= frame_h - 2.0
-                            )
-                            if not touches_edge:
-                                camera2_interior_seen.add(seen_key)
-                            elif seen_track_id in active_ids and seen_key in camera2_interior_seen:
-                                finish_gallery(
-                                    2, int(seen_track_id),
-                                    journey_by_track.get(seen_key),
-                                )
-                                camera2_interior_seen.discard(seen_key)
-                                print(
-                                    f"[SCAN GALLERY CLOSED] camera=2 track={seen_track_id} "
-                                    f"reason=frame_exit frame={frame_id}"
-                                )
-                    if camera_id == 2:
                         # FIFO is permitted only between the scan station and the
                         # useful overview camera. It is never used on cameras 4-9.
                         fifo_ttl = max(1, int(getattr(Config, "SCAN_FIFO_TTL_FRAMES", 900)))
@@ -419,6 +394,29 @@ def main() -> None:
                                 for vector in runtime_reid.track_features.get(key, []):
                                     database.save_embedding(global_id, 2, int(scan_track_id), frame_id, vector)
                             print(f"[SCAN FIFO] global_id={global_id} camera=1->2 local_track={scan_track_id}")
+                    if camera_id == 2:
+                        # Run after FIFO binding so a gallery closed at the frame
+                        # edge can still be saved under the correct global identity.
+                        frame_h, frame_w = frame.shape[:2]
+                        for seen_track_id, seen_bbox in tracks:
+                            seen_key = (2, int(seen_track_id))
+                            sx1, sy1, sx2, sy2 = map(float, seen_bbox)
+                            touches_edge = (
+                                sx1 <= 1.0 or sy1 <= 1.0
+                                or sx2 >= frame_w - 2.0 or sy2 >= frame_h - 2.0
+                            )
+                            if not touches_edge:
+                                camera2_interior_seen.add(seen_key)
+                            elif seen_track_id in active_ids and seen_key in camera2_interior_seen:
+                                finish_gallery(
+                                    2, int(seen_track_id),
+                                    journey_by_track.get(seen_key),
+                                )
+                                camera2_interior_seen.discard(seen_key)
+                                print(
+                                    f"[SCAN GALLERY CLOSED] camera=2 track={seen_track_id} "
+                                    f"reason=frame_exit frame={frame_id}"
+                                )
                     if camera_id == 1:
                         # Zone activation is the trigger; it is independent of the
                         # feature-sampling interval configured in FeatureZoneManager.
