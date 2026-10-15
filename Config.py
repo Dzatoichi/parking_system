@@ -107,6 +107,7 @@ class Config:
     # Runtime controller Re-ID sampling on all nine cameras.
     RUNTIME_REID_EVERY_N_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_EVERY_N_FRAMES", "5"))
     RUNTIME_REID_MIN_SAMPLES = int(os.getenv("PARKING_RUNTIME_REID_MIN_SAMPLES", "2"))
+    RUNTIME_REID_DUPLICATE_THRESHOLD = float(os.getenv("PARKING_RUNTIME_REID_DUPLICATE_THRESHOLD", "0.90"))
     # Expire a handoff if no topology-eligible Re-ID match appears within this many target-camera frames.
     RUNTIME_REID_PENDING_TTL_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_PENDING_TTL_FRAMES", "900"))
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
