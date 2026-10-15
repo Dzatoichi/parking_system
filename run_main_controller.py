@@ -20,6 +20,7 @@ from Config import Config
 from FeaturesModule.FeaturesManager import FeaturesManager
 from FeatureZoneModule import EntrySessionManager, FeatureZoneManager
 from PlateOCRModule import PlateOCRTracker
+from DB.parking_repository import ParkingRepository
 from RuntimeReID import RuntimeReID
 from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
@@ -30,7 +31,10 @@ ZONES_PATH = ROOT / "feature_zones.yaml"
 TILE_SIZE = (640, 360)
 WINDOW_NAME = "Parking main controller"
 REPORT_PATH = ROOT / "main_controller_run_report.json"
-FEATURE_CAMERAS = (1, 2, 3)
+SCAN_CAMERAS = (1, 2, 3)
+FEATURE_CAMERAS = SCAN_CAMERAS
+GALLERY_CAMERAS = (2, 3)
+OCR_CAMERAS = (1,)
 INFERENCE_DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
 
@@ -72,6 +76,10 @@ def main() -> None:
     started_at = time.time()
     reid_matches: list[dict] = []
     reid_expired: list[dict] = []
+    database = ParkingRepository() if Config.DB_ENABLED else None
+    if database is not None:
+        database.connect()
+        print("[DATABASE] PostgreSQL connected; schema ready (JSONB embeddings, no pgvector).")
     network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
     print("[CONTROLLER] Camera network:", network.camera_ids)
     for warning in network.warnings:
@@ -119,6 +127,11 @@ def main() -> None:
     registration_started = False
     registration_completed = False
     search_mode = False
+    scan_pending: list[tuple[int, str]] = []
+    last_centers: dict[tuple[int, int], tuple[float, float]] = {}
+    movement_scores: dict[tuple[int, int], float] = {}
+    movement_state: dict[tuple[int, int], bool] = {}
+    previous_movement_state: dict[tuple[int, int], bool] = {}
 
     def open_camera(camera_id: int, seek_frame: int = 0) -> None:
         if camera_id in captures or camera_id in ended:
@@ -155,12 +168,13 @@ def main() -> None:
         if key in registered_tracks:
             return
         session = sessions.register_entry(1, int(track_id), int(frame_id))
-        journey_number = session.entry_order
+        journey_number = database.create_vehicle(1, int(track_id), int(frame_id)) if database is not None else session.entry_order
         registered_tracks.add(key)
         journey_by_track[key] = journey_number
         session_by_journey[journey_number] = session.session_id
+        scan_pending.append((journey_number, session.session_id))
         registration_started = True
-        print(f"[REGISTER] journey={journey_number} camera=1 track={track_id} session={session.session_id}")
+        print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
         # All configured streams are already running; this trigger starts capture
         # for this vehicle, not the physical camera streams.
 
@@ -172,8 +186,12 @@ def main() -> None:
         if gallery is not None:
             feature_closed[camera_id] += 1
             feature_count = len(gallery.get("original", [])) + len(gallery.get("flipped", []))
-            if journey_number is not None:
+            if journey_number is not None and camera_id in GALLERY_CAMERAS:
                 runtime_reid.add_identity_gallery(int(journey_number), gallery)
+                if database is not None:
+                    for mirrored, key_name in ((False, "original"), (True, "flipped")):
+                        for vector in gallery.get(key_name, []):
+                            database.save_embedding(journey_number, camera_id, track_id, frame_id, vector, mirrored)
             session_id = session_for_journey(journey_number) if journey_number is not None else None
             if session_id:
                 sessions.attach_gallery(session_id, camera_id, gallery)
@@ -255,7 +273,7 @@ def main() -> None:
                             key = (1, int(tid))
                             if key not in registered_tracks:
                                 start_registration(int(tid), frame_id)
-                    if frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
+                    if camera_id in OCR_CAMERAS and frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
                         moving_tracks = [
                             (int(tid), box) for tid, box in zip(ids, boxes)
                             if int(tid) in active_ids
@@ -265,8 +283,18 @@ def main() -> None:
                                 plate_votes[(camera_id, int(tid))][reading.text].append(
                                     float(reading.ocr_confidence)
                                 )
+                                global_id = journey_by_track.get((camera_id, int(tid)))
+                                if global_id is not None:
+                                    journey_plate_votes[int(global_id)][reading.text].append(float(reading.ocr_confidence))
+                                    if database is not None:
+                                        database.update_plate(
+                                            global_id, camera_id, int(tid), frame_id, reading.text,
+                                            reading.ocr_confidence, reading.plate_confidence, reading.subtype,
+                                        )
 
-                commands = transition_trackers[camera_id].update(frame_id, tracks)
+                # Camera 1 is a plate-scanning station, not a topology node. Its poor
+                # overview must not create downstream handoff tasks.
+                commands = transition_trackers[camera_id].update(frame_id, tracks) if camera_id != 1 else []
                 exit_counts = Counter(
                     command.track_id for command in commands
                     if command.type is CommandType.SEARCH_ON_CAMERA
