@@ -194,13 +194,15 @@ def main() -> None:
         registered_tracks.add(key)
         journey_by_track[key] = journey_number
         session_by_journey[journey_number] = session.session_id
-        scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0)))
         registration_started = True
         trigger_time = camera_times.get(1, 0.0)
         # Registration trigger wakes only the three scan cameras. The remaining
         # cameras stay closed until a topology EXIT creates a search task.
         open_camera(2, trigger_time)
         open_camera(3, trigger_time)
+        # Store the actual target-camera frame after timestamp seeking, otherwise
+        # the FIFO TTL would be measured from frame zero and could expire instantly.
+        scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0)))
         print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
         print(f"[SCAN ACTIVATION] cameras=1,2,3 trigger_time={trigger_time:.2f}s")
 
