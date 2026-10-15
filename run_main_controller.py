@@ -7,6 +7,8 @@ OCR runs only for active scan-zone tracks on cameras 1-3.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import json
+import time
 from pathlib import Path
 
 import cv2
@@ -27,6 +29,7 @@ ROOT = Path(__file__).resolve().parent
 ZONES_PATH = ROOT / "feature_zones.yaml"
 TILE_SIZE = (640, 360)
 WINDOW_NAME = "Parking main controller"
+REPORT_PATH = ROOT / "main_controller_run_report.json"
 FEATURE_CAMERAS = (1, 2, 3)
 INFERENCE_DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
@@ -66,6 +69,9 @@ def draw_journey_label(image, box, journey_number: int) -> None:
 
 
 def main() -> None:
+    started_at = time.time()
+    reid_matches: list[dict] = []
+    reid_expired: list[dict] = []
     network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
     print("[CONTROLLER] Camera network:", network.camera_ids)
     for warning in network.warnings:
@@ -360,6 +366,13 @@ def main() -> None:
                     active_items = []
                     for journey_id, created_target_frame in pending_items:
                         if frame_id - created_target_frame > ttl:
+                            expired_record = {
+                                "journey_id": int(journey_id),
+                                "source_camera": int(source_camera),
+                                "target_camera": int(target_camera),
+                                "target_frames_waited": int(frame_id - created_target_frame),
+                            }
+                            reid_expired.append(expired_record)
                             print(
                                 f"[REID EXPIRED] journey={journey_id} "
                                 f"{source_camera}->{target_camera} after {frame_id - created_target_frame} target frames"
@@ -400,6 +413,13 @@ def main() -> None:
                         ]
                         used_journeys.add(journey_id)
                         used_tracks.add(candidate_id)
+                        reid_matches.append({
+                            "journey_id": int(journey_id),
+                            "source_camera": int(source_camera),
+                            "target_camera": int(target_camera),
+                            "target_track_id": int(candidate_id),
+                            "cosine_similarity": float(score),
+                        })
                         print(
                             f"[REID MATCH] journey={journey_id} {source_camera}->{target_camera} "
                             f"track={candidate_id} cosine={score:.3f}"
@@ -484,6 +504,29 @@ def main() -> None:
                     f"[SHUTDOWN GALLERY] camera={cam} track={track_id} "
                     f"samples={len(gallery.get('original', [])) + len(gallery.get('flipped', []))}"
                 )
+        plate_summary = {
+            str(journey_id): {
+                "plate": best_plate(votes)[0],
+                "confidence": best_plate(votes)[1],
+                "votes": {plate: len(scores) for plate, scores in votes.items()},
+            }
+            for journey_id, votes in journey_plate_votes.items()
+        }
+        report = {
+            "elapsed_seconds": round(time.time() - started_at, 2),
+            "video_sources": {str(cid): str(Config.CAMERA_VIDEO_PATHS.get(cid, "")) for cid in range(1, 10)},
+            "frames_processed": {str(cid): int(count) for cid, count in frame_ids.items()},
+            "streams_ended": sorted(int(cid) for cid in ended),
+            "registered_journeys": len(session_by_journey),
+            "reid_matches": reid_matches,
+            "reid_expired_handoffs": reid_expired,
+            "journey_plates": plate_summary,
+            "feature_galleries_closed": {str(cid): int(count) for cid, count in feature_closed.items()},
+            "ocr_cameras": list(FEATURE_CAMERAS),
+            "database_writes": 0,
+        }
+        REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[CONTROLLER] Run report written to {REPORT_PATH}")
         print("[CONTROLLER] Closed streams. Feature galleries closed:", dict(feature_closed))
 
 
