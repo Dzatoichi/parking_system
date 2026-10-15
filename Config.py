@@ -101,8 +101,6 @@ class Config:
     MATCH_VEHICLE_BATCH_SIZE = 32
     # Сколько разных по времени эмбеддингов хранить в текущем tracklet.
     TRACKLET_MAX_FEATURES = 5
-    # Maximum accepted original embeddings per camera-local feature gallery.
-    FEATURE_GALLERY_MAX_SAMPLES = 24
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
     # 1 - мягкое затухание, большое число (например 99) - требуем совпадения строго подряд.
     CANDIDATE_MISS_PENALTY = 1
