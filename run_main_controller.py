@@ -1,8 +1,9 @@
-"""Nine-camera controller: scan-zone registration, topology-scoped Re-ID, scan-zone OCR.
+"""Nine-camera controller: camera-1 plate scan, moving-track Re-ID and topology handoffs.
 
-All configured streams advance independently. FIFO is restricted to cameras 1-3;
-other handoffs require both a topology ENTER event and an appearance match.
-OCR runs only for active scan-zone tracks on cameras 1-3.
+Camera 1 assigns persistent global identities from scan-zone entries and reads plates.
+Camera 2 binds scan entries to the useful overview by scan-zone FIFO; all network
+handoffs on cameras 2-9 require an eligible topology ENTER and moving-track Re-ID.
+OCR runs on camera 1 only.
 """
 from __future__ import annotations
 
@@ -459,6 +460,14 @@ def main() -> None:
                     elif command.type is CommandType.MARK_ARRIVED:
                         # ENTER merely makes this local track eligible for the source
                         # camera's pending task. Identity assignment happens below via Re-ID.
+                        if database is not None:
+                            database.record_event(
+                                command.camera_id, command.track_id, command.frame_id,
+                                "topology_enter", source_camera_id=command.source_camera,
+                                target_camera_id=command.camera_id,
+                                movement_state="moving" if movement_state.get((command.camera_id, int(command.track_id)), False) else "stationary",
+                                bbox=next((box for tid, box in tracks if int(tid) == int(command.track_id)), None),
+                            )
                         print(
                             f"[REID CANDIDATE GATE] {command.source_camera}->{command.camera_id} "
                             f"local_track={command.track_id}; waiting for moving-track appearance match"
@@ -480,6 +489,13 @@ def main() -> None:
                                 "target_frames_waited": int(frame_id - created_target_frame),
                             }
                             reid_expired.append(expired_record)
+                            if database is not None:
+                                database.record_event(
+                                    target_camera, -1, frame_id, "reid_handoff_expired",
+                                    global_id=journey_id, source_camera_id=source_camera,
+                                    target_camera_id=target_camera,
+                                    details={"target_frames_waited": int(frame_id - created_target_frame)},
+                                )
                             print(
                                 f"[REID EXPIRED] journey={journey_id} "
                                 f"{source_camera}->{target_camera} after {frame_id - created_target_frame} target frames"
