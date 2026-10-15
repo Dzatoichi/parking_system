@@ -374,10 +374,24 @@ def main() -> None:
                 print("[SEARCH VIEW] registration finished; showing downstream/search cameras only")
 
             if search_mode:
-                tiles = {cid: tile for cid, tile in tiles.items() if cid not in FEATURE_CAMERAS}
+                # Display only downstream cameras currently carrying a registered
+                # journey or awaited by a handoff task, not every camera ever opened.
+                journey_cameras = {
+                    camera_id for camera_id, _track_id in journey_by_track
+                    if camera_id not in FEATURE_CAMERAS
+                }
+                awaited_cameras = {
+                    target_camera
+                    for (_source_camera, target_camera), queue in waiting.items()
+                    if queue and target_camera not in FEATURE_CAMERAS
+                }
+                relevant_cameras = journey_cameras | awaited_cameras
+                tiles = {
+                    cid: tile for cid, tile in tiles.items()
+                    if cid not in FEATURE_CAMERAS and cid in relevant_cameras
+                }
                 if not tiles and captures:
-                    # Streams may have been opened in this same cycle; the next loop
-                    # will produce their first search-view frames.
+                    # A handoff may have just opened its target; wait for its first frame.
                     continue
             ordered_ids = sorted(tiles)
             rows = []
