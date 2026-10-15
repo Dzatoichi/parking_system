@@ -42,7 +42,7 @@ class FeatureZoneManager:
             raise ValueError("similarity_threshold must be between 0 and 1")
         if interval < 1:
             raise ValueError("sample_every_n_frames must be >= 1")
-        max_samples = Config.FEATURE_GALLERY_MAX_SAMPLES if max_samples_per_track is None else max_samples_per_track
+        max_samples = getattr(Config, "FEATURE_GALLERY_MAX_SAMPLES", 24) if max_samples_per_track is None else max_samples_per_track
         if crop_size < 1:
             raise ValueError("min_crop_size must be >= 1")
         if max_samples < 1:
