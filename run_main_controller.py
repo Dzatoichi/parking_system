@@ -147,6 +147,9 @@ def main() -> None:
     # Camera 1 remains the persistent scan/trigger view; the second tile follows
     # the current downstream search destination. Cached tiles survive idle skips.
     display_camera_id = 1
+    # Dynamic display pool: camera 1 is persistent, scan cameras are temporary,
+    # and the current route-search destination is added while its task is active.
+    visual_camera_pool: set[int] = {1}
     last_tiles: dict[int, np.ndarray] = {}
 
     def open_camera(camera_id: int, seek_seconds: float = 0.0) -> None:
@@ -203,6 +206,7 @@ def main() -> None:
         # cameras stay closed until a topology EXIT creates a search task.
         open_camera(2, trigger_time)
         open_camera(3, trigger_time)
+        visual_camera_pool.update(SCAN_CAMERAS)
         # Store the actual target-camera frame after timestamp seeking, otherwise
         # the FIFO TTL would be measured from frame zero and could expire instantly.
         scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0)))
@@ -510,6 +514,7 @@ def main() -> None:
                         open_camera(command.camera_id, target_time)
                         if command.camera_id in captures:
                             display_camera_id = command.camera_id
+                            visual_camera_pool.add(command.camera_id)
                             print(
                                 f"[DISPLAY FOCUS] camera={display_camera_id} "
                                 f"reason=search_handoff from={command.source_camera} "
@@ -775,21 +780,28 @@ def main() -> None:
                 display_camera_id = 1
                 print("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
 
-            # Choose display after all cameras have updated scan-zone state.
-            # Keep the 3-camera scan view during feature collection. Afterward,
-            # camera 1 stays visible alongside the current route-search camera.
+            # Maintain the dynamic visualization pool after all cameras update.
+            # Camera 1 is permanent; scan cameras are included during collection;
+            # the active route destination is independently added to the pool.
             scan_view_active = bool(scan_pending or scan_zone_active_cameras)
-            available_tiles = {
-                cid: tile for cid, tile in last_tiles.items() if cid in captures
-            }
             if scan_view_active:
-                shown_ids = [cid for cid in SCAN_CAMERAS if cid in available_tiles]
-            elif display_camera_id != 1 and display_camera_id in available_tiles:
-                shown_ids = [cid for cid in (1, display_camera_id) if cid in available_tiles]
+                visual_camera_pool.update(SCAN_CAMERAS)
             else:
-                shown_ids = [1] if 1 in available_tiles else (
-                    [min(available_tiles)] if available_tiles else []
+                visual_camera_pool.difference_update(cid for cid in SCAN_CAMERAS if cid != 1)
+            if display_camera_id != 1 and display_camera_id in captures:
+                visual_camera_pool.add(display_camera_id)
+            else:
+                # Remove an obsolete route tile when no route search is focused.
+                visual_camera_pool.difference_update(
+                    cid for cid in list(visual_camera_pool)
+                    if cid != 1 and cid not in SCAN_CAMERAS
                 )
+
+            available_tiles = {
+                cid: tile for cid, tile in last_tiles.items()
+                if cid in captures and cid in visual_camera_pool
+            }
+            shown_ids = sorted(available_tiles)
 
             if not shown_ids:
                 # Camera 1 deliberately skips inference on idle frames. Cached tiles
@@ -801,15 +813,19 @@ def main() -> None:
                     break
                 continue
 
+            # Render every camera currently in the pool in a compact 2-column grid.
+            # Missing tiles are not added to the pool; only currently available frames show.
+            columns = 2 if len(shown_ids) > 1 else 1
+            rows = (len(shown_ids) + columns - 1) // columns
             blank = np.zeros((TILE_SIZE[1], TILE_SIZE[0], 3), dtype=np.uint8)
-            if scan_view_active:
-                cells = [available_tiles.get(cid, blank) for cid in SCAN_CAMERAS]
-                grid = np.vstack((np.hstack((cells[0], cells[1])),
-                                  np.hstack((cells[2], blank))))
-            elif len(shown_ids) == 2:
-                grid = np.hstack((available_tiles[shown_ids[0]], available_tiles[shown_ids[1]]))
-            else:
-                grid = available_tiles[shown_ids[0]]
+            cells = [available_tiles[cid] for cid in shown_ids]
+            while len(cells) < rows * columns:
+                cells.append(blank)
+            grid_rows = [
+                np.hstack(cells[row * columns:(row + 1) * columns])
+                for row in range(rows)
+            ]
+            grid = grid_rows[0] if len(grid_rows) == 1 else np.vstack(grid_rows)
             cv2.resizeWindow(WINDOW_NAME, grid.shape[1], grid.shape[0])
             cv2.imshow(WINDOW_NAME, grid)
             key = cv2.waitKey(1) & 0xFF
