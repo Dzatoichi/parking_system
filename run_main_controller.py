@@ -134,7 +134,7 @@ def main() -> None:
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
-     registration_completed = False
+    registration_completed = False
     search_mode = False
     scan_pending: list[tuple[int, str, int]] = []
     last_centers: dict[tuple[int, int], tuple[float, float]] = {}
@@ -682,9 +682,9 @@ def main() -> None:
                     for line in network.camera(camera_id).lines:
                         p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
                         # Bright magenta transition lines stand out from vehicle boxes.
-                    cv2.line(display, p1, p2, (255, 0, 255), 3)
-                    cv2.circle(display, p1, 6, (255, 0, 255), -1)
-                    cv2.circle(display, p2, 6, (255, 0, 255), -1)
+                        cv2.line(display, p1, p2, (255, 0, 255), 3)
+                        cv2.circle(display, p1, 6, (255, 0, 255), -1)
+                        cv2.circle(display, p2, 6, (255, 0, 255), -1)
 
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
