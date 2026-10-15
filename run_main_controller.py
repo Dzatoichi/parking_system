@@ -752,15 +752,9 @@ def main() -> None:
                 )
                 cv2.putText(tile, f"CAM {camera_id} | {phase}", (10, 21),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-                # During active feature collection, show the scan station trio
-                # (whichever streams are currently open). Once scan collection ends,
-                # show only the current downstream search destination. Camera 1 keeps
-                # processing as the trigger even when it is not the displayed tile.
-                scan_view_active = bool(scan_pending or scan_zone_active_cameras)
-                if scan_view_active and camera_id in SCAN_CAMERAS:
-                    tiles[camera_id] = tile
-                elif not scan_view_active and camera_id == display_camera_id:
-                    tiles[camera_id] = tile
+                # Collect rendered tiles first. Display selection is made after all
+                # cameras have been processed so scan-zone state is complete.
+                tiles[camera_id] = tile
                 frame_ids[camera_id] += 1
 
             # When the final downstream journey/search task disappears, return
@@ -779,6 +773,13 @@ def main() -> None:
                 display_camera_id = 1
                 print("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
 
+            # Choose the display only after all cameras have updated scan-zone state.
+            scan_view_active = bool(scan_pending or scan_zone_active_cameras)
+            if scan_view_active:
+                tiles = {cid: tile for cid, tile in tiles.items() if cid in SCAN_CAMERAS}
+            else:
+                tiles = {cid: tile for cid, tile in tiles.items() if cid == display_camera_id}
+
             if not tiles:
                 # Camera 1 deliberately skips inference on idle frames. That leaves
                 # this iteration without display tiles, but must not stop the
@@ -790,13 +791,18 @@ def main() -> None:
                     break
                 continue
 
-            # The focused camera fills the window; all other active streams remain
-            # live in the processing loop but are not shown in the feature-collection view.
             ordered_ids = sorted(tiles)
-            if ordered_ids:
+            if scan_view_active:
+                # Three 640x360 tiles fit in a 2x2 grid at 1280x720.
+                blank = np.zeros((TILE_SIZE[1], TILE_SIZE[0], 3), dtype=np.uint8)
+                cells = [tiles.get(cid, blank) for cid in SCAN_CAMERAS]
+                top = np.hstack((cells[0], cells[1]))
+                bottom = np.hstack((cells[2], blank))
+                grid = np.vstack((top, bottom))
+            else:
                 grid = tiles[ordered_ids[0]]
-                cv2.resizeWindow(WINDOW_NAME, grid.shape[1], grid.shape[0])
-                cv2.imshow(WINDOW_NAME, grid)
+            cv2.resizeWindow(WINDOW_NAME, grid.shape[1], grid.shape[0])
+            cv2.imshow(WINDOW_NAME, grid)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
