@@ -90,12 +90,16 @@ class Config:
     EXTRACT_FRAMES_FOR_DETECT = 3
     EXTRACT_SIM_THRESHOLD = 0.90
 
-    # --- Matcher ---
-    # Как сворачивать матрицу сходств tracklet x галерея в одно число:
-    #   "max"       - максимум по всем парам (поведение до правок, самый оптимистичный)
-    #   "topk_mean" - среднее по MATCH_SIM_TOPK лучшим парам (консервативнее)
-    MATCH_SIM_AGGREGATION = "max"
+    # --- Re-ID / Matcher ---
+    # Стартовый консервативный порог; его нужно калибровать на размеченных переходах.
+    REID_SIMILARITY_THRESHOLD = float(os.getenv("PARKING_REID_SIMILARITY_THRESHOLD", "0.92"))
+    # Оценка по среднему K лучших пар, чтобы не полагаться на один случайный пик.
+    MATCH_SIM_AGGREGATION = "topk_mean"
     MATCH_SIM_TOPK = 5
+    # Число tracklet'ов в одном матричном батче Matcher (ограничивает память).
+    MATCH_TRACKLET_BATCH_SIZE = 32
+    # Сколько разных по времени эмбеддингов хранить в текущем tracklet.
+    TRACKLET_MAX_FEATURES = 5
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
     # 1 - мягкое затухание, большое число (например 99) - требуем совпадения строго подряд.
     CANDIDATE_MISS_PENALTY = 1
