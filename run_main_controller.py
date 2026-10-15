@@ -103,8 +103,8 @@ def main() -> None:
     runtime_reid = RuntimeReID(
         features,
         threshold=Config.REID_SIMILARITY_THRESHOLD,
-        sample_every=max(1, int(getattr(Config, "RUNTIME_REID_EVERY_N_FRAMES", 5))),
-        min_samples=max(1, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 2))),
+        sample_every=max(1, int(getattr(Config, "RUNTIME_REID_EVERY_N_FRAMES", 2))),
+        min_samples=max(1, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 1))),
     )
     plate_ocr = PlateOCRTracker(
         plate_model_path=Config.YOLO_PLATE_MODEL_PATH,
