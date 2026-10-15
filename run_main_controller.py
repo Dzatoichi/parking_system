@@ -105,7 +105,7 @@ def main() -> None:
     journey_by_track: dict[tuple[int, int], int] = {}
     session_by_journey: dict[int, str] = {}
     waiting: dict[tuple[int, int], list[tuple[int, str | None]]] = defaultdict(list)
-    pending_reid: dict[tuple[int, int], list[int]] = defaultdict(list)
+    pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -301,7 +301,7 @@ def main() -> None:
                                 runtime_reid.extend_identity(
                                     journey_number, command.source_camera, command.track_id
                                 )
-                            pending_reid[pair].append(journey_number)
+                            pending_reid[pair].append((journey_number, frame_ids.get(command.camera_id, 0)))
                         # Source track embeddings are no longer needed once handed off.
                         runtime_reid.forget_track(command.source_camera, command.track_id)
 
@@ -353,9 +353,24 @@ def main() -> None:
 
                 # Resolve only topology-eligible destination tracks against pending journeys.
                 # A target track must have crossed an ENTER line from this exact source camera.
-                for (source_camera, target_camera), journey_ids in list(pending_reid.items()):
-                    if target_camera != camera_id or not journey_ids:
+                for (source_camera, target_camera), pending_items in list(pending_reid.items()):
+                    if target_camera != camera_id or not pending_items:
                         continue
+                    ttl = max(1, int(getattr(Config, "RUNTIME_REID_PENDING_TTL_FRAMES", 900)))
+                    active_items = []
+                    for journey_id, created_target_frame in pending_items:
+                        if frame_id - created_target_frame > ttl:
+                            print(
+                                f"[REID EXPIRED] journey={journey_id} "
+                                f"{source_camera}->{target_camera} after {frame_id - created_target_frame} target frames"
+                            )
+                        else:
+                            active_items.append((journey_id, created_target_frame))
+                    pending_items[:] = active_items
+                    if not pending_items:
+                        pending_reid.pop((source_camera, target_camera), None)
+                        continue
+                    journey_ids = [journey_id for journey_id, _ in pending_items]
                     candidate_ids = transition_trackers[camera_id].tracks_arrived_from(source_camera)
                     scored = []
                     for candidate_id in candidate_ids:
@@ -380,14 +395,16 @@ def main() -> None:
                                     sessions.bind_track(session_id, camera_id, candidate_id)
                                 except (KeyError, ValueError) as exc:
                                     print(f"[SESSION BIND WARNING] {exc}")
-                        journey_ids.remove(journey_id)
+                        pending_items[:] = [
+                            item for item in pending_items if item[0] != journey_id
+                        ]
                         used_journeys.add(journey_id)
                         used_tracks.add(candidate_id)
                         print(
                             f"[REID MATCH] journey={journey_id} {source_camera}->{target_camera} "
                             f"track={candidate_id} cosine={score:.3f}"
                         )
-                    if not journey_ids:
+                    if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
 
                 for dropped_track_id in transition_trackers[camera_id].detector.dropped_tracks:
