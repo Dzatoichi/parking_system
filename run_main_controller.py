@@ -35,7 +35,7 @@ REPORT_PATH = ROOT / "main_controller_run_report.json"
 SCAN_CAMERAS = (1, 2, 3)
 FEATURE_CAMERAS = SCAN_CAMERAS
 GALLERY_CAMERAS = (1, 2, 3)
-OCR_CAMERAS = (1, 2)
+OCR_CAMERAS = (1,)
 INFERENCE_DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
 
@@ -192,7 +192,7 @@ def main() -> None:
         session = sessions.get_session(session_id)
         return session_id if session and session["status"] == "active" else None
 
-    def start_registration(track_id: int, frame_id: int) -> None:
+    def start_registration(track_id: int, frame_id: int, current_tracks) -> None:
         key = (1, int(track_id))
         if key in registered_tracks:
             return
@@ -209,7 +209,11 @@ def main() -> None:
         visual_camera_pool.update(SCAN_CAMERAS)
         # Store the actual target-camera frame after timestamp seeking, otherwise
         # the FIFO TTL would be measured from frame zero and could expire instantly.
-        scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0)))
+        entry_bbox = next((box for tid, box in current_tracks if int(tid) == int(track_id)), None)
+        entry_lane = feature_managers[1]._matching_profile(1, entry_bbox) if entry_bbox is not None else None
+        if entry_lane is None:
+            entry_lane = "LEFT"
+        scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0), entry_lane))
         print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
         print(f"[SCAN ACTIVATION] cameras=1,2,3 trigger_time={trigger_time:.2f}s")
 
@@ -390,7 +394,7 @@ def main() -> None:
                         # useful overview camera. It is never used on cameras 4-9.
                         fifo_ttl = max(1, int(getattr(Config, "SCAN_FIFO_TTL_FRAMES", 900)))
                         fresh_scan_queue = []
-                        for pending_global_id, pending_session_id, created_camera2_frame in scan_pending:
+                        for pending_global_id, pending_session_id, created_camera2_frame, pending_lane in scan_pending:
                             if frame_id - created_camera2_frame > fifo_ttl:
                                 print(f"[SCAN FIFO EXPIRED] global_id={pending_global_id} waited_frames={frame_id - created_camera2_frame}")
                                 if database is not None:
@@ -400,13 +404,27 @@ def main() -> None:
                                         details={"target_frames_waited": int(frame_id - created_camera2_frame)},
                                     )
                             else:
-                                fresh_scan_queue.append((pending_global_id, pending_session_id, created_camera2_frame))
+                                fresh_scan_queue.append((pending_global_id, pending_session_id, created_camera2_frame, pending_lane))
                         scan_pending[:] = fresh_scan_queue
-                        for scan_track_id in sorted(active_ids):
+                        # Bind only on the frame a track is actually inside camera 2's
+                        # configured scan polygon. Active galleries persist outside the zone,
+                        # so active_ids alone must never drive FIFO assignment.
+                        in_zone_tracks = []
+                        for scan_track_id, scan_bbox in tracks:
+                            lane = feature_managers[2]._matching_profile(2, scan_bbox)
+                            if lane is not None:
+                                in_zone_tracks.append((int(scan_track_id), lane))
+                        for scan_track_id, lane in sorted(in_zone_tracks):
                             key = (2, int(scan_track_id))
-                            if key in journey_by_track or not scan_pending:
+                            if key in journey_by_track:
                                 continue
-                            global_id, session_id, _created_camera2_frame = scan_pending.pop(0)
+                            queue_index = next(
+                                (i for i, item in enumerate(scan_pending) if item[3] == lane),
+                                None,
+                            )
+                            if queue_index is None:
+                                continue
+                            global_id, session_id, _created_camera2_frame, _pending_lane = scan_pending.pop(queue_index)
                             journey_by_track[key] = global_id
                             newly_bound_tracks.add(key)
                             try:
@@ -455,12 +473,10 @@ def main() -> None:
                         for tid in sorted(active_ids):
                             key = (1, int(tid))
                             if key not in registered_tracks:
-                                start_registration(int(tid), frame_id)
+                                start_registration(int(tid), frame_id, tracks)
                     if camera_id in OCR_CAMERAS and frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
-                        # OCR is attempted on the scan-zone cameras while the vehicle
-                        # anchor is actually inside its configured zone. Camera 2 can
-                        # recover a plate missed by camera 1; its FIFO binding is done
-                        # earlier in this frame, so votes attach to the correct journey.
+                        # Plate OCR is performed only at the entry camera. Camera 2
+                        # receives the already-read plate through lane-specific FIFO.
                         scan_zone_tracks = [
                             (int(tid), box) for tid, box in zip(ids, boxes)
                             if int(tid) in active_ids
