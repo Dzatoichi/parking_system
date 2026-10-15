@@ -372,7 +372,6 @@ def main() -> None:
                         if journey_id in used_journeys or candidate_id in used_tracks:
                             continue
                         journey_by_track[(camera_id, candidate_id)] = journey_id
-                        runtime_reid.extend_identity(journey_id, camera_id, candidate_id)
                         session_id = session_by_journey.get(journey_id)
                         if session_id:
                             current = sessions.get_session(session_id)
