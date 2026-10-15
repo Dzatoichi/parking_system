@@ -122,7 +122,9 @@ def main() -> None:
     captures: dict[int, cv2.VideoCapture] = {}
     models: dict[int, YOLO] = {}
     frame_ids: dict[int, int] = defaultdict(int)
+    camera_times: dict[int, float] = defaultdict(float)
     ended: set[int] = set()
+    trigger_skip_frames = max(1, int(getattr(Config, "TRIGGER_SKIP_FRAMES", 3)))
 
     # Labels describe a journey, not a camera-local BoT-SORT ID.
     journey_by_track: dict[tuple[int, int], int] = {}
@@ -142,7 +144,12 @@ def main() -> None:
     movement_last_seen: dict[tuple[int, int], int] = {}
     track_last_seen: dict[tuple[int, int], int] = {}
 
-    def open_camera(camera_id: int, seek_frame: int = 0) -> None:
+    def open_camera(camera_id: int, seek_seconds: float = 0.0) -> None:
+        """Open a stream only when a trigger/search task needs it.
+
+        Video files are assumed to share a recording timeline. Seek by timestamp,
+        not by copying another camera's frame index (FPS can differ).
+        """
         if camera_id in captures or camera_id in ended:
             return
         try:
@@ -156,13 +163,19 @@ def main() -> None:
             cap.release()
             ended.add(camera_id)
             return
-        target_frame = max(0, int(seek_frame))
-        if target_frame:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+        target_seconds = max(0.0, float(seek_seconds))
+        if target_seconds > 0:
+            cap.set(cv2.CAP_PROP_POS_MSEC, target_seconds * 1000.0)
         captures[camera_id] = cap
         models[camera_id] = YOLO(Config.YOLO_CAR_MODEL_PATH)
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        target_frame = max(0, int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0))
         frame_ids[camera_id] = target_frame
-        print(f"[STREAM] camera={camera_id} opened at frame={target_frame}: {source}")
+        camera_times[camera_id] = target_seconds
+        print(
+            f"[STREAM] lazy-open camera={camera_id} at ~{target_seconds:.2f}s "
+            f"(frame={target_frame}, fps={fps:.2f}): {source}"
+        )
 
     def session_for_journey(journey_number: int) -> str | None:
         session_id = session_by_journey.get(journey_number)
@@ -183,9 +196,13 @@ def main() -> None:
         session_by_journey[journey_number] = session.session_id
         scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0)))
         registration_started = True
+        trigger_time = camera_times.get(1, 0.0)
+        # Registration trigger wakes only the three scan cameras. The remaining
+        # cameras stay closed until a topology EXIT creates a search task.
+        open_camera(2, trigger_time)
+        open_camera(3, trigger_time)
         print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
-        # All configured streams are already running; this trigger starts capture
-        # for this vehicle, not the physical camera streams.
+        print(f"[SCAN ACTIVATION] cameras=1,2,3 trigger_time={trigger_time:.2f}s")
 
     def finish_gallery(camera_id: int, track_id: int, journey_number: int | None) -> None:
         if camera_id not in FEATURE_CAMERAS:
@@ -218,10 +235,9 @@ def main() -> None:
         )
         plate_votes.pop((camera_id, int(track_id)), None)
 
-    # Start every configured stream independently. Each video advances on its own
-    # timeline; do not seek cameras 2-9 to camera 1 frame indices.
-    for camera_id in range(1, 10):
-        open_camera(camera_id, 0)
+    # Only camera 1 is open initially, acting as a lightweight trigger.
+    # Scan cameras 2-3 and route cameras 4-9 are opened on demand.
+    open_camera(1, 0.0)
     if 1 not in captures:
         if database is not None:
             database.close()
@@ -230,7 +246,10 @@ def main() -> None:
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
-        print("[CONTROLLER] Waiting for a vehicle to enter the configured feature zone on camera 1. Q/Esc exits.")
+        print(
+            f"[CONTROLLER] Lazy mode: camera 1 trigger skips {trigger_skip_frames - 1} "
+            "frames between trigger inferences; cameras 2-9 open only on demand. Q/Esc exits."
+        )
 
         while captures:
             tiles: dict[int, np.ndarray] = {}
@@ -240,6 +259,19 @@ def main() -> None:
                 if camera_id not in captures:
                     continue
                 cap = captures[camera_id]
+                # Before the first scan trigger, camera 1 is a lightweight detector:
+                # read every source frame but run tracking/inference only every Nth frame.
+                if camera_id == 1 and not registration_started and frame_ids[1] % trigger_skip_frames != 0:
+                    ok, _skipped_raw = cap.read()
+                    if not ok:
+                        cap.release()
+                        del captures[camera_id]
+                        ended.add(camera_id)
+                        print(f"[STREAM END] camera={camera_id}")
+                        continue
+                    frame_ids[camera_id] += 1
+                    camera_times[camera_id] = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
+                    continue
                 ok, raw = cap.read()
                 if not ok:
                     cap.release()
@@ -248,6 +280,7 @@ def main() -> None:
                     print(f"[STREAM END] camera={camera_id}")
                     continue
 
+                camera_times[camera_id] = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
                 frame = cv2.resize(raw, (1280, 720))
                 frame_id = frame_ids[camera_id]
                 result = models[camera_id].track(
@@ -425,6 +458,10 @@ def main() -> None:
                             continue
                         session_id = session_for_journey(journey_number)
                         pair = (command.source_camera, command.camera_id)
+                        # A topology EXIT creates a search task: lazily open only its
+                        # destination camera, aligned to the source video's timestamp.
+                        target_time = camera_times.get(command.source_camera, 0.0)
+                        open_camera(command.camera_id, target_time)
                         finish_gallery(command.source_camera, command.track_id, journey_number)
                         # Camera 1 has no topology transitions. Every actual network handoff
                         # (cameras 2-9) must pass topology eligibility AND Re-ID.
@@ -644,7 +681,10 @@ def main() -> None:
                 if camera_id != 1:
                     for line in network.camera(camera_id).lines:
                         p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
-                        cv2.line(display, p1, p2, (0, 0, 255), 2)
+                        # Bright magenta transition lines stand out from vehicle boxes.
+                    cv2.line(display, p1, p2, (255, 0, 255), 3)
+                    cv2.circle(display, p1, 6, (255, 0, 255), -1)
+                    cv2.circle(display, p2, 6, (255, 0, 255), -1)
 
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
@@ -661,7 +701,7 @@ def main() -> None:
             if not tiles:
                 break
 
-            # Keep all connected camera streams visible during the 9-video soak test.
+            # Display only streams that are currently active; inactive cameras stay closed.
             ordered_ids = sorted(tiles)
             # Keep each camera tile at 16:9. Up to four cameras use the same
             # 2x2 layout as run_feature_capture; larger sets use 3 columns.
