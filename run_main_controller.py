@@ -137,6 +137,9 @@ def main() -> None:
     registration_completed = False
     search_mode = False
     scan_pending: list[tuple[int, str, int, str]] = []
+    # Journeys already assigned to camera-2 tracks remain part of the scan display
+    # until their camera-2 topology EXIT line fires. Polygon membership is not an exit signal.
+    scan_camera2_journeys: set[int] = set()
     last_centers: dict[tuple[int, int], tuple[float, float]] = {}
     movement_scores: dict[tuple[int, int], float] = {}
     movement_state: dict[tuple[int, int], bool] = {}
@@ -427,6 +430,7 @@ def main() -> None:
                                 continue
                             global_id, session_id, _created_camera2_frame, _pending_lane = scan_pending.pop(queue_index)
                             journey_by_track[key] = global_id
+                            scan_camera2_journeys.add(int(global_id))
                             newly_bound_tracks.add(key)
                             try:
                                 sessions.bind_track(session_id, 2, int(scan_track_id))
@@ -532,6 +536,10 @@ def main() -> None:
                     if command.type is CommandType.SEARCH_ON_CAMERA:
                         source_key = (command.source_camera, int(command.track_id))
                         journey_number = journey_by_track.pop(source_key, None)
+                        if command.source_camera == 2 and journey_number is not None:
+                            # Keep cameras 2/3 displayed until every registered vehicle
+                            # has crossed camera 2's configured EXIT topology line.
+                            scan_camera2_journeys.discard(int(journey_number))
                         if journey_number is None:
                             continue
                         session_id = session_for_journey(journey_number)
@@ -797,7 +805,7 @@ def main() -> None:
             # throughout; this changes focus only, not the processing state.
             downstream_tracks_active = any(camera_id != 1 for camera_id, _ in journey_by_track)
             search_tasks_pending = bool(scan_pending or any(pending_reid.values()))
-            scan_collection_active = bool(scan_zone_active_cameras or scan_pending)
+            scan_collection_active = bool(scan_pending or scan_camera2_journeys)
             if (
                 display_camera_id != 1
                 and 1 in captures
@@ -808,12 +816,11 @@ def main() -> None:
                 display_camera_id = 1
                 print("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
 
-            # Maintain the dynamic visualization pool after all cameras update.
-            # Camera 1 is permanent; scan cameras are included during collection;
-            # the active route destination is independently added to the pool.
-            # Do not use scan_pending here: an unmatched/duplicate FIFO item must
-            # not keep scan cameras visible after all vehicles have left the zones.
-            scan_view_active = bool(scan_zone_active_cameras)
+            # Camera 1 is permanent. Keep cameras 2/3 visible while any registered
+            # journey is waiting for camera 2 or has a bound camera-2 track that has
+            # not crossed its topology EXIT line. Do not infer completion from zone
+            # polygon membership or gallery activity; multiple cars may overlap in time.
+            scan_view_active = bool(scan_pending or scan_camera2_journeys)
             if scan_view_active:
                 visual_camera_pool.update(SCAN_CAMERAS)
             else:
