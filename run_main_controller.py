@@ -184,7 +184,7 @@ def main() -> None:
         return session_id if session and session["status"] == "active" else None
 
     def start_registration(track_id: int, frame_id: int) -> None:
-         key = (1, int(track_id))
+        key = (1, int(track_id))
         if key in registered_tracks:
             return
         session = sessions.register_entry(1, int(track_id), int(frame_id))
@@ -192,7 +192,7 @@ def main() -> None:
         registered_tracks.add(key)
         journey_by_track[key] = journey_number
         session_by_journey[journey_number] = session.session_id
-         trigger_time = camera_times.get(1, 0.0)
+        trigger_time = camera_times.get(1, 0.0)
         # Registration trigger wakes only the three scan cameras. The remaining
         # cameras stay closed until a topology EXIT creates a search task.
         open_camera(2, trigger_time)
