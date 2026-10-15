@@ -1,9 +1,9 @@
-"""Nine-camera controller: camera-1 plate scan, moving-track Re-ID and topology handoffs.
+"""Nine-camera controller: camera-1 registration gallery, downstream Re-ID and topology handoffs.
 
-Camera 1 assigns persistent global identities from scan-zone entries and reads plates.
-Camera 2 binds scan entries to the useful overview by scan-zone FIFO; all network
-handoffs on cameras 2-9 require an eligible topology ENTER and moving-track Re-ID.
-OCR runs on camera 1 only.
+Camera 1 assigns global identities, reads plates and builds the initial Re-ID gallery,
+but does not participate in downstream topology tracking. Camera 2 binds scan entries
+by the configured scan FIFO and also contributes gallery features; cameras 2-9 track
+routes using topology handoffs and moving-track Re-ID. OCR runs on camera 1 only.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ WINDOW_NAME = "Parking main controller"
 REPORT_PATH = ROOT / "main_controller_run_report.json"
 SCAN_CAMERAS = (1, 2, 3)
 FEATURE_CAMERAS = SCAN_CAMERAS
-GALLERY_CAMERAS = (2, 3)
+GALLERY_CAMERAS = (1, 2, 3)
 OCR_CAMERAS = (1,)
 INFERENCE_DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
@@ -313,21 +313,16 @@ def main() -> None:
                 # feature_zones.yaml. No legacy TriggerModule ROI/area trigger is involved.
                 active_ids = set()
                 if camera_id in FEATURE_CAMERAS:
-                    if camera_id == 1:
-                        # Camera 1 is scan/OCR only: test zone membership without
-                        # running the Re-ID extractor or building an appearance gallery.
-                        active_ids = {
-                            int(tid) for tid, box in zip(ids, boxes)
-                            if feature_managers[1].is_in_zone(1, box)
-                        }
-                    else:
-                        feature_managers[camera_id].process_frame(
-                            camera_id, frame_id, frame, tracks
-                        )
-                        active_ids = {
-                            tid for cam, tid in feature_managers[camera_id].active_track_keys()
-                            if cam == camera_id
-                        }
+                    # Camera 1 builds the initial appearance gallery as well as triggering
+                    # registration/OCR. It is excluded only from downstream topology events.
+                    # Cameras 2 and 3 also build galleries and remain active route cameras.
+                    feature_managers[camera_id].process_frame(
+                        camera_id, frame_id, frame, tracks
+                    )
+                    active_ids = {
+                        tid for cam, tid in feature_managers[camera_id].active_track_keys()
+                        if cam == camera_id
+                    }
                     if camera_id == 2:
                         # FIFO is permitted only between the scan station and the
                         # useful overview camera. It is never used on cameras 4-9.
@@ -431,7 +426,7 @@ def main() -> None:
                         session_id = session_for_journey(journey_number)
                         pair = (command.source_camera, command.camera_id)
                         finish_gallery(command.source_camera, command.track_id, journey_number)
-                        # Camera 1 is excluded above. Every actual network handoff
+                        # Camera 1 has no topology transitions. Every actual network handoff
                         # (cameras 2-9) must pass topology eligibility AND Re-ID.
                         if command.source_camera not in GALLERY_CAMERAS:
                             runtime_reid.extend_identity(
@@ -587,8 +582,8 @@ def main() -> None:
                     global_id = journey_by_track.get(stale_key)
                     if camera_id in GALLERY_CAMERAS and global_id is not None:
                         finish_gallery(camera_id, stale_track_id, global_id)
-                    elif camera_id == 1:
-                        feature_managers[1].end_track(1, stale_track_id)
+                    elif camera_id in FEATURE_CAMERAS:
+                        feature_managers[camera_id].end_track(camera_id, stale_track_id)
                     journey_by_track.pop(stale_key, None)
                     track_last_seen.pop(stale_key, None)
                     registered_tracks.discard(stale_key)
@@ -645,7 +640,7 @@ def main() -> None:
                         color = (0, 0, 255)
                         cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
 
-                # Camera 1 is scan-only; draw topology lines only on cameras 2-9.
+                # Camera 1 builds the registration gallery but has no route topology lines.
                 if camera_id != 1:
                     for line in network.camera(camera_id).lines:
                         p1, p2 = tuple(map(int, line.p1)), tuple(map(int, line.p2))
@@ -654,7 +649,7 @@ def main() -> None:
                 tile = cv2.resize(display, TILE_SIZE)
                 cv2.rectangle(tile, (0, 0), (TILE_SIZE[0], 30), (20, 20, 20), -1)
                 phase = (
-                    "PLATE SCAN ONLY" if camera_id == 1
+                    "REGISTRATION + RE-ID GALLERY" if camera_id == 1
                     else "SCAN ZONE / RE-ID GALLERY" if camera_id in GALLERY_CAMERAS
                     else "MOVEMENT + TOPOLOGY + RE-ID"
                 )
