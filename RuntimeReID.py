@@ -25,6 +25,8 @@ class RuntimeReID:
         self.track_features: dict[tuple[int, int], list[np.ndarray]] = defaultdict(list)
         self.last_sample_frame: dict[tuple[int, int], int] = {}
         self.last_scores: dict[tuple[int, int], tuple[int, float]] = {}
+        # Avoid printing the same comparison on every video frame.
+        self._last_match_log_state: dict[tuple[int, int, int], tuple] = {}
 
     @staticmethod
     def _valid(vector):
@@ -98,12 +100,37 @@ class RuntimeReID:
         return float(np.partition(flat, flat.size - k)[-k:].mean())
 
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
-        track_features = self.track_features.get((int(camera_id), int(track_id)), [])
-        gallery = self.identity_gallery.get(int(journey_id), [])
+        camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
+        track_features = self.track_features.get((camera_id, track_id), [])
+        gallery = self.identity_gallery.get(journey_id, [])
+        log_key = (camera_id, track_id, journey_id)
+
         if len(track_features) < self.min_samples or not gallery:
+            state = (len(track_features), len(gallery), None, "INSUFFICIENT_FEATURES")
+            if self._last_match_log_state.get(log_key) != state:
+                print(
+                    f"[REID SIM] camera={camera_id} track={track_id} journey={journey_id} "
+                    f"sim=NA track_features={len(track_features)} "
+                    f"journey_features={len(gallery)} min_track_features={self.min_samples} "
+                    f"result=INSUFFICIENT_FEATURES"
+                )
+                self._last_match_log_state[log_key] = state
             return None
+
         score = self._score(track_features, gallery)
-        self.last_scores[(int(camera_id), int(track_id))] = (int(journey_id), score)
+        self.last_scores[(camera_id, track_id)] = (journey_id, score)
+        result = "ACCEPT" if score >= self.threshold else "REJECT"
+        # Feature counts change only when a new appearance sample is accepted, so
+        # this prints useful score updates without flooding the log every frame.
+        state = (len(track_features), len(gallery), round(float(score), 3), result)
+        if self._last_match_log_state.get(log_key) != state:
+            print(
+                f"[REID SIM] camera={camera_id} track={track_id} journey={journey_id} "
+                f"sim={score:.3f} threshold={self.threshold:.3f} "
+                f"track_features={len(track_features)} journey_features={len(gallery)} "
+                f"result={result}"
+            )
+            self._last_match_log_state[log_key] = state
         return score if score >= self.threshold else None
 
     def extend_identity(self, journey_id: int, camera_id: int, track_id: int) -> None:
