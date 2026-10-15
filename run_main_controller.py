@@ -23,6 +23,7 @@ from Config import Config
 from FeaturesModule.FeaturesManager import FeaturesManager
 from FeatureZoneModule import EntrySessionManager, FeatureZoneManager
 from PlateOCRModule import PlateOCRTracker
+from RuntimeReID import RuntimeReID
 from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
 
@@ -81,6 +82,12 @@ def main() -> None:
         cid: FeatureZoneManager(features, str(ZONES_PATH))
         for cid in FEATURE_CAMERAS
     }
+    runtime_reid = RuntimeReID(
+        features,
+        threshold=Config.REID_SIMILARITY_THRESHOLD,
+        sample_every=max(1, int(getattr(Config, "RUNTIME_REID_EVERY_N_FRAMES", 5))),
+        min_samples=max(1, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 2))),
+    )
     plate_ocr = PlateOCRTracker(
         plate_model_path=Config.YOLO_PLATE_MODEL_PATH,
         ocr_checkpoint_path=Config.OCR_MODEL_PATH,
@@ -103,6 +110,7 @@ def main() -> None:
     journey_by_track: dict[tuple[int, int], int] = {}
     session_by_journey: dict[int, str] = {}
     waiting: dict[tuple[int, int], list[tuple[int, str | None]]] = defaultdict(list)
+    pending_reid: dict[tuple[int, int], list[int]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
@@ -151,11 +159,8 @@ def main() -> None:
         session_by_journey[journey_number] = session.session_id
         registration_started = True
         print(f"[REGISTER] journey={journey_number} camera=1 track={track_id} session={session.session_id}")
-        # Match run_feature_capture: cameras 2 and 3 are opened only for the
-        # registration-capture phase. Downstream cameras (4-9) must NOT start
-        # until an EXIT crossing creates a concrete SEARCH_ON_CAMERA task.
-        open_camera(2, frame_id)
-        open_camera(3, frame_id)
+        # All configured streams are already running; this trigger starts capture
+        # for this vehicle, not the physical camera streams.
 
     def finish_gallery(camera_id: int, track_id: int, journey_number: int | None) -> None:
         if camera_id not in FEATURE_CAMERAS:
@@ -164,6 +169,8 @@ def main() -> None:
         if gallery is None:
             return
         feature_closed[camera_id] += 1
+        if journey_number is not None:
+            runtime_reid.add_identity_gallery(int(journey_number), gallery)
         session_id = session_for_journey(journey_number) if journey_number is not None else None
         if session_id:
             sessions.attach_gallery(session_id, camera_id, gallery)
@@ -176,7 +183,10 @@ def main() -> None:
         )
         plate_votes.pop((camera_id, int(track_id)), None)
 
-    open_camera(1, 0)
+    # Start every configured stream independently. Each video advances on its own
+    # timeline; do not seek cameras 2-9 to camera 1 frame indices.
+    for camera_id in range(1, 10):
+        open_camera(camera_id, 0)
     if 1 not in captures:
         raise RuntimeError("Camera 1 could not be opened; controller cannot listen for registration triggers.")
 
@@ -214,6 +224,9 @@ def main() -> None:
                 )[0]
                 boxes, ids, tracks = unpack_tracks(result)
                 visible_ids = [int(tid) for tid in ids]
+                # Re-ID tracklets are sampled on all nine cameras. OCR remains limited
+                # to the configured registration/scan zone cameras 1-3 below.
+                runtime_reid.update_camera(camera_id, frame_id, frame, tracks)
 
                 # Use the current registration-zone logic from run_feature_capture:
                 # FeatureZoneManager activates a track when its configured anchor enters
@@ -276,8 +289,16 @@ def main() -> None:
                             continue
                         session_id = session_for_journey(journey_number)
                         pair = (command.source_camera, command.camera_id)
-                        waiting[pair].append((journey_number, session_id))
                         finish_gallery(command.source_camera, command.track_id, journey_number)
+                        # FIFO is retained only inside the configured scan zone (1-3).
+                        # All other handoffs become topology-scoped Re-ID tasks.
+                        if command.source_camera in FEATURE_CAMERAS and command.camera_id in FEATURE_CAMERAS:
+                            waiting[pair].append((journey_number, session_id))
+                        else:
+                            runtime_reid.extend_identity(
+                                journey_number, command.source_camera, command.track_id
+                            )
+                            pending_reid[pair].append(journey_number)
 
                         # Registration is considered complete exactly at camera-2 EXIT.
                         if command.source_camera == 2:
@@ -298,28 +319,72 @@ def main() -> None:
                                 f"[HANDOFF TASK] journey={journey_number} "
                                 f"{command.source_camera}->{command.camera_id}"
                             )
-                        open_camera(command.camera_id, command.frame_id)
+                        # Target stream is already active; never start/seek it on a handoff.
 
                     elif command.type is CommandType.MARK_ARRIVED:
                         pair = (command.source_camera, command.camera_id)
-                        queue = waiting.get(pair, [])
-                        if not queue:
+                        if command.source_camera in FEATURE_CAMERAS and command.camera_id in FEATURE_CAMERAS:
+                            queue = waiting.get(pair, [])
+                            if queue:
+                                journey_number, session_id = queue.pop(0)
+                                journey_by_track[(command.camera_id, int(command.track_id))] = journey_number
+                                if session_id:
+                                    current = sessions.get_session(session_id)
+                                    if current and current["status"] == "active":
+                                        try:
+                                            sessions.bind_track(session_id, command.camera_id, command.track_id)
+                                        except (KeyError, ValueError) as exc:
+                                            print(f"[SESSION BIND WARNING] {exc}")
+                                print(
+                                    f"[SCAN FIFO] journey={journey_number} "
+                                    f"{command.source_camera}->{command.camera_id} "
+                                    f"local_track={command.track_id}"
+                                )
+                        else:
+                            print(
+                                f"[REID CANDIDATE GATE] {command.source_camera}->{command.camera_id} "
+                                f"local_track={command.track_id}; waiting for appearance match"
+                            )
+
+                # Resolve only topology-eligible destination tracks against pending journeys.
+                # A target track must have crossed an ENTER line from this exact source camera.
+                for (source_camera, target_camera), journey_ids in list(pending_reid.items()):
+                    if target_camera != camera_id or not journey_ids:
+                        continue
+                    candidate_ids = transition_trackers[camera_id].tracks_arrived_from(source_camera)
+                    scored = []
+                    for candidate_id in candidate_ids:
+                        if (camera_id, int(candidate_id)) in journey_by_track:
                             continue
-                        journey_number, session_id = queue.pop(0)
-                        journey_by_track[(command.camera_id, int(command.track_id))] = journey_number
-                        # Bind session tracks through the network while registration is active.
-                        if session_id and command.camera_id in range(1, 10):
+                        for journey_id in journey_ids:
+                            score = runtime_reid.match_track_to_journey(
+                                camera_id, int(candidate_id), int(journey_id)
+                            )
+                            if score is not None:
+                                scored.append((float(score), int(journey_id), int(candidate_id)))
+                    used_journeys, used_tracks = set(), set()
+                    for score, journey_id, candidate_id in sorted(scored, reverse=True):
+                        if journey_id in used_journeys or candidate_id in used_tracks:
+                            continue
+                        journey_by_track[(camera_id, candidate_id)] = journey_id
+                        runtime_reid.extend_identity(journey_id, camera_id, candidate_id)
+                        session_id = session_by_journey.get(journey_id)
+                        if session_id:
                             current = sessions.get_session(session_id)
                             if current and current["status"] == "active":
                                 try:
-                                    sessions.bind_track(session_id, command.camera_id, command.track_id)
+                                    sessions.bind_track(session_id, camera_id, candidate_id)
                                 except (KeyError, ValueError) as exc:
                                     print(f"[SESSION BIND WARNING] {exc}")
+                        journey_ids.remove(journey_id)
+                        used_journeys.add(journey_id)
+                        used_tracks.add(candidate_id)
                         print(
-                            f"[CANDIDATE FIFO] journey={journey_number} "
-                            f"{command.source_camera}->{command.camera_id} "
-                            f"local_track={command.track_id}"
+                            f"[REID MATCH] journey={journey_id} {source_camera}->{target_camera} "
+                            f"track={candidate_id} cosine={score:.3f}"
                         )
+                    if not journey_ids:
+                        pending_reid.pop((source_camera, target_camera), None)
 
                 # Keep feature gallery closure in sync if the track was lost without an EXIT.
                 if camera_id in FEATURE_CAMERAS:
@@ -359,39 +424,7 @@ def main() -> None:
             if not tiles:
                 break
 
-            # Switch the UI and stream set only after every registered session has
-            # completed its camera-2 registration leg. Keep downstream streams (4-9)
-            # and any lazily opened search targets; remove registration cameras 1-3.
-            if registration_completed and not sessions.active_sessions() and not search_mode:
-                search_mode = True
-                for registration_camera in FEATURE_CAMERAS:
-                    cap = captures.pop(registration_camera, None)
-                    if cap is not None:
-                        cap.release()
-                    models.pop(registration_camera, None)
-                    print(f"[SEARCH VIEW] removed registration camera {registration_camera}")
-                print("[SEARCH VIEW] registration finished; showing downstream/search cameras only")
-
-            if search_mode:
-                # Display only downstream cameras currently carrying a registered
-                # journey or awaited by a handoff task, not every camera ever opened.
-                journey_cameras = {
-                    camera_id for camera_id, _track_id in journey_by_track
-                    if camera_id not in FEATURE_CAMERAS
-                }
-                awaited_cameras = {
-                    target_camera
-                    for (_source_camera, target_camera), queue in waiting.items()
-                    if queue and target_camera not in FEATURE_CAMERAS
-                }
-                relevant_cameras = journey_cameras | awaited_cameras
-                tiles = {
-                    cid: tile for cid, tile in tiles.items()
-                    if cid not in FEATURE_CAMERAS and cid in relevant_cameras
-                }
-                if not tiles and captures:
-                    # A handoff may have just opened its target; wait for its first frame.
-                    continue
+            # Keep all connected camera streams visible during the 9-video soak test.
             ordered_ids = sorted(tiles)
             # Keep each camera tile at 16:9. Up to four cameras use the same
             # 2x2 layout as run_feature_capture; larger sets use 3 columns.
