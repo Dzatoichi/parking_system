@@ -112,4 +112,4 @@ class Config:
     # (должно быть больше track_buffer трекера, сейчас 30)
     TRACKLET_LOST_TTL_FRAMES = 150
     # Минимальная сторона кропа (px) для извлечения Re-ID признаков
-    FEATURE_MIN_CROP_SIZE = 8
+    FEATURE_MIN_CROP_SIZE = 24
