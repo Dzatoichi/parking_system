@@ -1,6 +1,6 @@
 sample_every_n_frames: 3
 similarity_threshold: 0.9
-min_crop_size: 8
+min_crop_size: 24
 cameras:
   '1':
     LEFT:
