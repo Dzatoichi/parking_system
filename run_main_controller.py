@@ -755,6 +755,20 @@ def main() -> None:
                     tiles[camera_id] = tile
                 frame_ids[camera_id] += 1
 
+            # When the final downstream journey/search task disappears, return
+            # the display to camera 1. The trigger stream has remained active
+            # throughout; this changes focus only, not the processing state.
+            downstream_tracks_active = any(camera_id != 1 for camera_id, _ in journey_by_track)
+            search_tasks_pending = bool(scan_pending or any(pending_reid.values()))
+            if (
+                display_camera_id != 1
+                and 1 in captures
+                and not downstream_tracks_active
+                and not search_tasks_pending
+            ):
+                display_camera_id = 1
+                print("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
+
             if not tiles:
                 # Camera 1 deliberately skips inference on idle frames. That leaves
                 # this iteration without display tiles, but must not stop the
