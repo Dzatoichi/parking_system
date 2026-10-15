@@ -250,9 +250,35 @@ def main() -> None:
                 )[0]
                 boxes, ids, tracks = unpack_tracks(result)
                 visible_ids = [int(tid) for tid in ids]
-                # Re-ID tracklets are sampled on all nine cameras. OCR remains limited
-                # to the configured registration/scan zone cameras 1-3 below.
-                runtime_reid.update_camera(camera_id, frame_id, frame, tracks)
+                sampled_embeddings = []
+                moving_tracks = []
+                if camera_id != 1:
+                    for track_id, bbox in tracks:
+                        x1, y1, x2, y2 = map(float, bbox)
+                        center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+                        object_size = max(1.0, ((x2 - x1) + (y2 - y1)) / 2.0)
+                        key = (camera_id, int(track_id))
+                        previous = last_centers.get(key)
+                        score = 0.0 if previous is None else (
+                            ((center[0] - previous[0]) ** 2 + (center[1] - previous[1]) ** 2) ** 0.5
+                        ) / object_size
+                        last_centers[key] = center
+                        movement_scores[key] = score
+                        is_moving = score >= Config.TRACKER_MOVEMENT_THRESHOLD
+                        old_state = movement_state.get(key)
+                        movement_state[key] = is_moving
+                        if old_state is not None and old_state != is_moving and database is not None:
+                            database.record_event(
+                                camera_id, track_id, frame_id,
+                                "movement_started" if is_moving else "movement_stopped",
+                                global_id=journey_by_track.get(key), movement_state="moving" if is_moving else "stationary",
+                                bbox=bbox, details={"normalized_displacement": float(score)},
+                            )
+                        if is_moving:
+                            moving_tracks.append((int(track_id), bbox))
+                    sampled_embeddings = runtime_reid.update_camera(
+                        camera_id, frame_id, frame, moving_tracks
+                    )
 
                 # Use the current registration-zone logic from run_feature_capture:
                 # FeatureZoneManager activates a track when its configured anchor enters
@@ -266,6 +292,28 @@ def main() -> None:
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
                         if cam == camera_id
                     }
+                    if camera_id == 2:
+                        # FIFO is permitted only between the scan station and the
+                        # useful overview camera. It is never used on cameras 4-9.
+                        for scan_track_id in sorted(active_ids):
+                            key = (2, int(scan_track_id))
+                            if key in journey_by_track or not scan_pending:
+                                continue
+                            global_id, session_id = scan_pending.pop(0)
+                            journey_by_track[key] = global_id
+                            try:
+                                sessions.bind_track(session_id, 2, int(scan_track_id))
+                            except (KeyError, ValueError) as exc:
+                                print(f"[SCAN FIFO WARNING] {exc}")
+                            if database is not None:
+                                database.record_event(
+                                    2, int(scan_track_id), frame_id, "scan_zone_fifo_bind",
+                                    global_id=global_id, source_camera_id=1, target_camera_id=2,
+                                    movement_state="moving" if movement_state.get(key, False) else "stationary",
+                                )
+                                for vector in runtime_reid.track_features.get(key, []):
+                                    database.save_embedding(global_id, 2, int(scan_track_id), frame_id, vector)
+                            print(f"[SCAN FIFO] global_id={global_id} camera=1->2 local_track={scan_track_id}")
                     if camera_id == 1:
                         # Zone activation is the trigger; it is independent of the
                         # feature-sampling interval configured in FeatureZoneManager.
@@ -294,6 +342,12 @@ def main() -> None:
 
                 # Camera 1 is a plate-scanning station, not a topology node. Its poor
                 # overview must not create downstream handoff tasks.
+                # Persist new moving-track embeddings after the scan-zone binding check.
+                if database is not None:
+                    for sampled_track_id, vector in sampled_embeddings:
+                        global_id = journey_by_track.get((camera_id, int(sampled_track_id)))
+                        if global_id is not None:
+                            database.save_embedding(global_id, camera_id, sampled_track_id, frame_id, vector)
                 commands = transition_trackers[camera_id].update(frame_id, tracks) if camera_id != 1 else []
                 exit_counts = Counter(
                     command.track_id for command in commands
@@ -336,6 +390,13 @@ def main() -> None:
                                     journey_number, command.source_camera, command.track_id
                                 )
                             pending_reid[pair].append((journey_number, frame_ids.get(command.camera_id, 0)))
+                        if database is not None:
+                            database.record_event(
+                                command.source_camera, command.track_id, command.frame_id,
+                                "topology_exit", global_id=journey_number,
+                                source_camera_id=command.source_camera, target_camera_id=command.camera_id,
+                                movement_state="moving",
+                            )
                         # Source track embeddings are no longer needed once handed off.
                         runtime_reid.forget_track(command.source_camera, command.track_id)
 
@@ -441,6 +502,12 @@ def main() -> None:
                         ]
                         used_journeys.add(journey_id)
                         used_tracks.add(candidate_id)
+                        if database is not None:
+                            database.record_event(
+                                target_camera, candidate_id, frame_id, "reid_match",
+                                global_id=journey_id, source_camera_id=source_camera,
+                                target_camera_id=target_camera, movement_state="moving", score=score,
+                            )
                         reid_matches.append({
                             "journey_id": int(journey_id),
                             "source_camera": int(source_camera),
@@ -551,11 +618,13 @@ def main() -> None:
             "journey_plates": plate_summary,
             "feature_galleries_closed": {str(cid): int(count) for cid, count in feature_closed.items()},
             "ocr_cameras": list(FEATURE_CAMERAS),
-            "database_writes": 0,
+            "database_writes": "enabled" if database is not None else "disabled",
         }
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[CONTROLLER] Run report written to {REPORT_PATH}")
         print("[CONTROLLER] Closed streams. Feature galleries closed:", dict(feature_closed))
+        if database is not None:
+            database.close()
 
 
 if __name__ == "__main__":
