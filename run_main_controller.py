@@ -79,7 +79,14 @@ def main() -> None:
     reid_expired: list[dict] = []
     database = ParkingRepository() if Config.DB_ENABLED else None
     if database is not None:
-        database.connect()
+        try:
+            database.connect()
+        except Exception as exc:
+            raise RuntimeError(
+                "PostgreSQL connection failed. Start PostgreSQL/PGlite's PostgreSQL-wire "
+                "server and configure PARKING_DB_HOST, PARKING_DB_PORT, PARKING_DB_NAME, "
+                "PARKING_DB_USER and PARKING_DB_PASSWORD."
+            ) from exc
         print("[DATABASE] PostgreSQL connected; schema ready (JSONB embeddings, no pgvector).")
     network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
     print("[CONTROLLER] Camera network:", network.camera_ids)
@@ -215,6 +222,8 @@ def main() -> None:
     for camera_id in range(1, 10):
         open_camera(camera_id, 0)
     if 1 not in captures:
+        if database is not None:
+            database.close()
         raise RuntimeError("Camera 1 could not be opened; controller cannot listen for registration triggers.")
 
     try:
