@@ -135,7 +135,7 @@ def main() -> None:
     registration_started = False
     registration_completed = False
     search_mode = False
-    scan_pending: list[tuple[int, str]] = []
+    scan_pending: list[tuple[int, str, int]] = []
     last_centers: dict[tuple[int, int], tuple[float, float]] = {}
     movement_scores: dict[tuple[int, int], float] = {}
     movement_state: dict[tuple[int, int], bool] = {}
@@ -181,7 +181,7 @@ def main() -> None:
         registered_tracks.add(key)
         journey_by_track[key] = journey_number
         session_by_journey[journey_number] = session.session_id
-        scan_pending.append((journey_number, session.session_id))
+        scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0)))
         registration_started = True
         print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
         # All configured streams are already running; this trigger starts capture
@@ -331,11 +331,25 @@ def main() -> None:
                     if camera_id == 2:
                         # FIFO is permitted only between the scan station and the
                         # useful overview camera. It is never used on cameras 4-9.
+                        fifo_ttl = max(1, int(getattr(Config, "SCAN_FIFO_TTL_FRAMES", 900)))
+                        fresh_scan_queue = []
+                        for pending_global_id, pending_session_id, created_camera2_frame in scan_pending:
+                            if frame_id - created_camera2_frame > fifo_ttl:
+                                print(f"[SCAN FIFO EXPIRED] global_id={pending_global_id} waited_frames={frame_id - created_camera2_frame}")
+                                if database is not None:
+                                    database.record_event(
+                                        2, -1, frame_id, "scan_fifo_expired",
+                                        global_id=pending_global_id, source_camera_id=1, target_camera_id=2,
+                                        details={"target_frames_waited": int(frame_id - created_camera2_frame)},
+                                    )
+                            else:
+                                fresh_scan_queue.append((pending_global_id, pending_session_id, created_camera2_frame))
+                        scan_pending[:] = fresh_scan_queue
                         for scan_track_id in sorted(active_ids):
                             key = (2, int(scan_track_id))
                             if key in journey_by_track or not scan_pending:
                                 continue
-                            global_id, session_id = scan_pending.pop(0)
+                            global_id, session_id, _created_camera2_frame = scan_pending.pop(0)
                             journey_by_track[key] = global_id
                             newly_bound_tracks.add(key)
                             try:
