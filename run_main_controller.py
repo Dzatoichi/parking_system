@@ -738,7 +738,15 @@ def main() -> None:
                 frame_ids[camera_id] += 1
 
             if not tiles:
-                break
+                # Camera 1 deliberately skips inference on idle frames. That leaves
+                # this iteration without display tiles, but must not stop the
+                # controller while any stream is still open.
+                if not captures:
+                    break
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    break
+                continue
 
             # Display only streams that are currently active; inactive cameras stay closed.
             ordered_ids = sorted(tiles)
