@@ -7,12 +7,15 @@ class Config:
 
     # Значения по умолчанию оставлены для локальной разработки,
     # на сервере переопределяются переменными окружения PARKING_DB_*
+    DB_ENABLED = os.getenv("PARKING_DB_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    DB_CONNECT_TIMEOUT = int(os.getenv("PARKING_DB_CONNECT_TIMEOUT", "5"))
     DB_PARAMS = {
         'database': os.getenv("PARKING_DB_NAME", "parking_db"),
         'user': os.getenv("PARKING_DB_USER", "tracklet_manager"),
         'password': os.getenv("PARKING_DB_PASSWORD", "tracklet_manager"),
         'host': os.getenv("PARKING_DB_HOST", "127.0.0.1"),
         'port': os.getenv("PARKING_DB_PORT", "5432"),
+        "connect_timeout": DB_CONNECT_TIMEOUT,
     }
 
     DEVICE: str = "cpu"
