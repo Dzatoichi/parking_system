@@ -170,10 +170,21 @@ class ParkingRepository:
              float(ocr_confidence), float(plate_confidence), str(subtype or "")),
         )
         self._run(
-            """UPDATE parking_vehicle
-               SET plate_text=%s, plate_confidence=%s, updated_at=NOW()
-               WHERE global_id=%s AND (%s >= plate_confidence OR plate_text IS NULL)""",
-            (text, float(ocr_confidence), int(global_id), float(ocr_confidence)),
+            """WITH consensus AS (
+                   SELECT plate_text, AVG(ocr_confidence) AS avg_confidence, COUNT(*) AS votes
+                   FROM parking_plate_read
+                   WHERE global_id=%s
+                   GROUP BY plate_text
+                   ORDER BY AVG(ocr_confidence) DESC, COUNT(*) DESC, plate_text ASC
+                   LIMIT 1
+               )
+               UPDATE parking_vehicle AS vehicle
+               SET plate_text=consensus.plate_text,
+                   plate_confidence=consensus.avg_confidence,
+                   updated_at=NOW()
+               FROM consensus
+               WHERE vehicle.global_id=%s""",
+            (int(global_id), int(global_id)),
         )
 
     def save_embedding(
