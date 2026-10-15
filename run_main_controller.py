@@ -254,6 +254,7 @@ def main() -> None:
                 for visible_track_id in visible_ids:
                     track_last_seen[(camera_id, int(visible_track_id))] = frame_id
                 sampled_embeddings = []
+                newly_bound_tracks: set[tuple[int, int]] = set()
                 moving_tracks = []
                 if camera_id != 1:
                     for track_id, bbox in tracks:
@@ -326,6 +327,7 @@ def main() -> None:
                                 continue
                             global_id, session_id = scan_pending.pop(0)
                             journey_by_track[key] = global_id
+                            newly_bound_tracks.add(key)
                             try:
                                 sessions.bind_track(session_id, 2, int(scan_track_id))
                             except (KeyError, ValueError) as exc:
@@ -371,7 +373,7 @@ def main() -> None:
                 if database is not None:
                     for sampled_track_id, vector in sampled_embeddings:
                         global_id = journey_by_track.get((camera_id, int(sampled_track_id)))
-                        if global_id is not None:
+                        if global_id is not None and (camera_id, int(sampled_track_id)) not in newly_bound_tracks:
                             database.save_embedding(global_id, camera_id, sampled_track_id, frame_id, vector)
                 commands = transition_trackers[camera_id].update(frame_id, tracks) if camera_id != 1 else []
                 exit_counts = Counter(
