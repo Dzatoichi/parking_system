@@ -761,22 +761,32 @@ def main() -> None:
                             key = (target_camera, int(candidate_id))
                             if key in journey_by_track:
                                 continue
-                            score = runtime_reid.match_track_to_journey(
+                            # Keep the diagnostic log, but rank every viable pair by its
+                            # raw appearance score, including scores below the acceptance
+                            # threshold, so the runner-up is not silently ignored.
+                            runtime_reid.match_track_to_journey(
                                 target_camera, int(candidate_id), int(journey_id)
                             )
-                            if score is not None:
+                            track_features = runtime_reid.track_features.get(key, [])
+                            identity_features = runtime_reid.identity_gallery.get(int(journey_id), [])
+                            if len(track_features) < runtime_reid.min_samples or not identity_features:
+                                continue
+                            raw_score, _mean_topk = RuntimeReID._similarity_scores(
+                                track_features[-1:], identity_features
+                            )
+                            if raw_score >= 0.0:
                                 scored_pairs.append((
-                                    float(score), int(journey_id), int(candidate_id),
+                                    float(raw_score), int(journey_id), int(candidate_id),
                                     int(arrival_frame), pending_index, arrival_index
                                 ))
 
                     scored_pairs.sort(key=lambda item: item[0], reverse=True)
                     if scored_pairs:
                         best = scored_pairs[0]
-                        # Require a margin over every competing journey/track pairing.
-                        # If the appearance scores are ambiguous, keep both queues alive.
+                        # Require both the configured similarity threshold and a margin
+                        # over every competing journey/track pairing.
                         second_score = scored_pairs[1][0] if len(scored_pairs) > 1 else -1.0
-                        if best[0] - second_score >= min_margin:
+                        if best[0] >= runtime_reid.threshold and best[0] - second_score >= min_margin:
                             score, journey_id, candidate_id, arrival_frame, pending_index, arrival_index = best
                             key = (target_camera, candidate_id)
                             if key not in journey_by_track:
