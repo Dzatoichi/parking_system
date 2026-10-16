@@ -101,6 +101,33 @@ class RuntimeReID:
         mean_topk = float(np.partition(flat, flat.size - k)[-k:].mean())
         return best, mean_topk
 
+    def log_feature_against_all_identities(
+        self, camera_id: int, track_id: int, query_feature, identity_labels: dict[int, str]
+    ) -> None:
+        """Log one new local-track vector against every registered identity gallery.
+
+        For each identity, best_sim is the maximum cosine similarity between this
+        single query vector and all vectors stored in that identity's gallery.
+        This is diagnostic only; it does not assign or change the vehicle identity.
+        """
+        query = self._valid(query_feature)
+        if query is None:
+            return
+        comparisons = []
+        for journey_id, gallery in self.identity_gallery.items():
+            if not gallery:
+                continue
+            best_sim, _ = self._similarity_scores([query], gallery)
+            plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
+            comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
+        comparisons.sort(key=lambda item: item[0], reverse=True)
+        for best_sim, journey_id, plate, gallery_count in comparisons:
+            print(
+                f"[REID COMPARE] camera={int(camera_id)} local_id={int(track_id)} "
+                f"vs_plate={plate} journey={journey_id} best_sim={best_sim:.3f} "
+                f"gallery_vectors={gallery_count}"
+            )
+
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
         camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
         track_features = self.track_features.get((camera_id, track_id), [])
