@@ -106,8 +106,12 @@ class Config:
     TRACKLET_MAX_FEATURES = 5
     # Runtime controller Re-ID sampling on all nine cameras.
     RUNTIME_REID_EVERY_N_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_EVERY_N_FRAMES", "2"))
-    RUNTIME_REID_MIN_SAMPLES = int(os.getenv("PARKING_RUNTIME_REID_MIN_SAMPLES", "1"))
+    # Require more than one independent appearance sample before a cross-camera match.
+    RUNTIME_REID_MIN_SAMPLES = int(os.getenv("PARKING_RUNTIME_REID_MIN_SAMPLES", "2"))
     RUNTIME_REID_DUPLICATE_THRESHOLD = float(os.getenv("PARKING_RUNTIME_REID_DUPLICATE_THRESHOLD", "0.90"))
+    REID_MATCH_MIN_MARGIN = float(os.getenv("PARKING_REID_MATCH_MIN_MARGIN", "0.04"))
+    # Candidate arrival must not predate the source EXIT task by default.
+    REID_MATCH_MAX_EARLY_FRAMES = int(os.getenv("PARKING_REID_MATCH_MAX_EARLY_FRAMES", "0"))
     # Expire a handoff if no topology-eligible Re-ID match appears within this many target-camera frames.
     RUNTIME_REID_PENDING_TTL_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_PENDING_TTL_FRAMES", "900"))
     SCAN_FIFO_TTL_FRAMES = int(os.getenv("PARKING_SCAN_FIFO_TTL_FRAMES", "900"))
