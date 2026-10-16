@@ -764,10 +764,10 @@ def main() -> None:
                                 bbox=next((box for tid, box in tracks if int(tid) == int(command.track_id)), None),
                             )
                         pair = (int(command.source_camera), int(command.camera_id))
-                        arrived_fifo[pair].append((int(command.track_id), int(command.frame_id)))
+                        arrived_candidates[pair].append((int(command.track_id), int(command.frame_id)))
                         print(
                             f"[BARRIER ARRIVAL] {pair[0]}->{pair[1]} "
-                            f"track={command.track_id} position={len(arrived_fifo[pair])}"
+                            f"track={command.track_id} position={len(arrived_candidates[pair])}"
                         )
 
                 # Resolve each directed barrier independently using topology-gated ReID scores.
@@ -803,7 +803,7 @@ def main() -> None:
                     if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
                         continue
-                    arrival_items = arrived_fifo[(source_camera, target_camera)]
+                    arrival_items = arrived_candidates[(source_camera, target_camera)]
                     arrival_items[:] = [
                         item for item in arrival_items
                         if frame_id - item[1] <= ttl
