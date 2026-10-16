@@ -2,8 +2,8 @@
 
 Camera 1 assigns global identities, reads plates and builds the initial Re-ID gallery,
 but does not participate in downstream topology tracking. Camera 2 binds scan entries
-by the configured scan FIFO and also contributes gallery features; cameras 2-9 track
-routes using topology handoffs and moving-track Re-ID. OCR runs on camera 1 only.
+using scan-lane geometry plus ReID and contributes gallery features; cameras 2-9 track
+routes using topology-gated ReID handoffs. OCR runs on camera 1 only.
 """
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def main() -> None:
     next_unidentified_journey = -1
     # Pending journeys and topology-arrived candidates, matched by ReID within each directed camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    arrived_fifo: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    arrived_candidates: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -152,8 +152,8 @@ def main() -> None:
     movement_last_seen: dict[tuple[int, int], int] = {}
     track_last_seen: dict[tuple[int, int], int] = {}
     camera2_interior_seen: set[tuple[int, int]] = set()
-    # First frame each camera-2 track enters a scan lane; FIFO order must not
-    # depend on camera-local tracker IDs, which are arbitrary identifiers.
+    # First frame each camera-2 track enters a scan lane; use this for temporal
+    # gating, never as a substitute for ReID identity evidence.
     scan_zone_first_seen: dict[tuple[int, int], int] = {}
     camera2_feature_closed_tracks: set[tuple[int, int]] = set()
     # Camera 1 remains the persistent scan/trigger view; the second tile follows
@@ -224,8 +224,8 @@ def main() -> None:
         open_camera(2, trigger_time)
         open_camera(3, trigger_time)
         visual_camera_pool.update(SCAN_CAMERAS)
-        # Store the actual target-camera frame after timestamp seeking, otherwise
-        # the FIFO TTL would be measured from frame zero and could expire instantly.
+        # Store the actual target-camera frame after timestamp seeking so the
+        # scan-search TTL is measured from the opened stream's current position.
         scan_pending.append((journey_number, session.session_id, frame_ids.get(2, 0), entry_lane))
         scan_source_track_by_journey[int(journey_number)] = int(track_id)
         print(f"[REGISTER] global_id={journey_number} camera=1 scan_track={track_id} session={session.session_id}")
@@ -629,7 +629,7 @@ def main() -> None:
                         assigned_journey = journey_by_track.get(sampled_key)
                         if assigned_journey is not None and assigned_journey > 0:
                             # This track already belongs to a registered journey through
-                            # the scan FIFO/topology handoff. Do not compare it against
+                            # the scan-zone/topology handoff. Do not compare it against
                             # every identity gallery merely because it is on camera 2+.
                             continue
                         print(
@@ -766,7 +766,7 @@ def main() -> None:
                         pair = (int(command.source_camera), int(command.camera_id))
                         arrived_fifo[pair].append((int(command.track_id), int(command.frame_id)))
                         print(
-                            f"[BARRIER FIFO ARRIVAL] {pair[0]}->{pair[1]} "
+                            f"[BARRIER ARRIVAL] {pair[0]}->{pair[1]} "
                             f"track={command.track_id} position={len(arrived_fifo[pair])}"
                         )
 
