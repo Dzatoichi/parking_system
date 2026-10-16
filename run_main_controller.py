@@ -132,7 +132,7 @@ def main() -> None:
     # Negative IDs are provisional, unrecognized journeys. They preserve the
     # vehicle's route across cameras without pretending we know its plate.
     next_unidentified_journey = -1
-    # Independent FIFO queues for each directed camera-to-camera barrier.
+    # Pending journeys and topology-arrived candidates, matched by ReID within each directed camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     arrived_fifo: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
@@ -468,33 +468,8 @@ def main() -> None:
                                 for vector in runtime_reid.track_features.get(key, []):
                                     database.save_embedding(global_id, 2, int(scan_track_id), frame_id, vector)
                             print(f"[SCAN FIFO] global_id={global_id} camera=1->2 local_track={scan_track_id}")
-                    if camera_id == 2:
-                        # Run after FIFO binding so a gallery closed at the frame
-                        # edge can still be saved under the correct global identity.
-                        frame_h, frame_w = frame.shape[:2]
-                        for seen_track_id, seen_bbox in tracks:
-                            seen_key = (2, int(seen_track_id))
-                            sx1, sy1, sx2, sy2 = map(float, seen_bbox)
-                            touches_edge = (
-                                sx1 <= 1.0 or sy1 <= 1.0
-                                or sx2 >= frame_w - 2.0 or sy2 >= frame_h - 2.0
-                            )
-                            if not touches_edge:
-                                camera2_interior_seen.add(seen_key)
-                            elif seen_track_id in active_ids and seen_key in camera2_interior_seen:
-                                finish_gallery(
-                                    2, int(seen_track_id),
-                                    journey_by_track.get(seen_key),
-                                )
-                                # Stop both scan-gallery and runtime Re-ID sampling
-                                # for this camera-local track after frame exit.
-                                camera2_feature_closed_tracks.add(seen_key)
-                                runtime_reid.forget_track(2, int(seen_track_id))
-                                camera2_interior_seen.discard(seen_key)
-                                print(
-                                    f"[SCAN GALLERY CLOSED] camera=2 track={seen_track_id} "
-                                    f"reason=frame_exit frame={frame_id}"
-                                )
+                    # Camera-2 gallery closure is handled only by the topology EXIT
+                    # command below for this exact track. Frame edges are not transitions.
                     if camera_id == 1:
                         # Zone activation is the trigger; it is independent of the
                         # feature-sampling interval configured in FeatureZoneManager.
@@ -571,7 +546,7 @@ def main() -> None:
                 # overview must not create downstream handoff tasks.
                 # Diagnostic Re-ID: compare each newly accepted single-vector observation
                 # against every registered vehicle gallery and print the best cosine score.
-                # FIFO still controls identity handoff; these scores are informational only.
+                # ReID is the identity decision; topology EXIT/ENTER events gate candidate generation.
                 if camera_id != 1 and sampled_embeddings:
                     identity_labels = {
                         int(journey_id): best_plate(votes)[0]
@@ -719,7 +694,7 @@ def main() -> None:
                             f"track={command.track_id} position={len(arrived_fifo[pair])}"
                         )
 
-                # Resolve each directed barrier independently using arrival order.
+                # Resolve each directed barrier independently using topology-gated ReID scores.
                 # Re-ID similarity cannot block propagation of a registered vehicle's plate.
                 for (source_camera, target_camera), pending_items in list(pending_reid.items()):
                     if target_camera != camera_id or not pending_items:
@@ -758,46 +733,91 @@ def main() -> None:
                         if frame_id - item[1] <= ttl
                         and (target_camera, item[0]) not in journey_by_track
                     ]
-                    while pending_items and arrival_items:
-                        journey_id, _created_target_frame = pending_items.pop(0)
-                        candidate_id, arrival_frame = arrival_items.pop(0)
-                        key = (target_camera, candidate_id)
-                        if key in journey_by_track:
+                    # Candidate generation is spatial/topological: a candidate must
+                    # have crossed the ENTER line from this exact source camera and be
+                    # inside the TTL window. Identity is decided by Re-ID, never queue order.
+                    min_margin = float(getattr(Config, "REID_MATCH_MIN_MARGIN", 0.04))
+                    scored_pairs = []
+                    for pending_index, (journey_id, _created_target_frame) in enumerate(pending_items):
+                        if journey_id <= 0:
                             continue
-                        journey_by_track[key] = int(journey_id)
-                        if database is not None and journey_id > 0 and target_camera not in GALLERY_CAMERAS:
-                            for vector in runtime_reid.track_features.get(key, []):
-                                database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
-                        session_id = session_by_journey.get(journey_id)
-                        if session_id:
-                            current = sessions.get_session(session_id)
-                            if current and current["status"] == "active":
-                                try:
-                                    sessions.bind_track(session_id, target_camera, candidate_id)
-                                except (KeyError, ValueError) as exc:
-                                    print(f"[SESSION BIND WARNING] {exc}")
-                        if database is not None and journey_id > 0:
-                            database.record_event(
-                                target_camera, candidate_id, frame_id, "fifo_handoff",
-                                global_id=journey_id, source_camera_id=source_camera,
-                                target_camera_id=target_camera,
-                                movement_state="moving" if movement_state.get(key, False) else "stationary",
-                                details={"arrival_frame": int(arrival_frame), "match_method": "fifo"},
+                        for arrival_index, (candidate_id, arrival_frame) in enumerate(arrival_items):
+                            key = (target_camera, int(candidate_id))
+                            if key in journey_by_track:
+                                continue
+                            score = runtime_reid.match_track_to_journey(
+                                target_camera, int(candidate_id), int(journey_id)
                             )
-                        if journey_id > 0:
-                            reid_matches.append({
-                                "journey_id": int(journey_id),
-                            "source_camera": int(source_camera),
-                            "target_camera": int(target_camera),
-                            "target_track_id": int(candidate_id),
-                            "cosine_similarity": None,
-                                "match_method": "fifo",
-                            })
+                            if score is not None:
+                                scored_pairs.append((
+                                    float(score), int(journey_id), int(candidate_id),
+                                    int(arrival_frame), pending_index, arrival_index
+                                ))
+
+                    scored_pairs.sort(key=lambda item: item[0], reverse=True)
+                    if scored_pairs:
+                        best = scored_pairs[0]
+                        # Require a margin over every competing journey/track pairing.
+                        # If the appearance scores are ambiguous, keep both queues alive.
+                        second_score = scored_pairs[1][0] if len(scored_pairs) > 1 else -1.0
+                        if best[0] - second_score >= min_margin:
+                            score, journey_id, candidate_id, arrival_frame, pending_index, arrival_index = best
+                            key = (target_camera, candidate_id)
+                            if key not in journey_by_track:
+                                pending_items.pop(pending_index)
+                                arrival_items.pop(arrival_index)
+                                journey_by_track[key] = journey_id
+                                if database is not None and target_camera not in GALLERY_CAMERAS:
+                                    for vector in runtime_reid.track_features.get(key, []):
+                                        database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
+                                session_id = session_by_journey.get(journey_id)
+                                if session_id:
+                                    current = sessions.get_session(session_id)
+                                    if current and current["status"] == "active":
+                                        try:
+                                            sessions.bind_track(session_id, target_camera, candidate_id)
+                                        except (KeyError, ValueError) as exc:
+                                            print(f"[SESSION BIND WARNING] {exc}")
+                                if database is not None:
+                                    database.record_event(
+                                        target_camera, candidate_id, frame_id, "reid_handoff",
+                                        global_id=journey_id, source_camera_id=source_camera,
+                                        target_camera_id=target_camera,
+                                        movement_state="moving" if movement_state.get(key, False) else "stationary",
+                                        details={
+                                            "arrival_frame": arrival_frame,
+                                            "match_method": "topology+reid",
+                                            "cosine_similarity": round(score, 4),
+                                            "score_margin": round(best[0] - second_score, 4),
+                                        },
+                                    )
+                                reid_matches.append({
+                                    "journey_id": journey_id,
+                                    "source_camera": source_camera,
+                                    "target_camera": target_camera,
+                                    "target_track_id": candidate_id,
+                                    "cosine_similarity": round(score, 4),
+                                    "score_margin": round(best[0] - second_score, 4),
+                                    "match_method": "topology+reid",
+                                })
+                                print(
+                                    f"[REID HANDOFF MATCH] journey={journey_id} "
+                                    f"{source_camera}->{target_camera} track={candidate_id} "
+                                    f"arrival_frame={arrival_frame} cosine={score:.3f} "
+                                    f"margin={best[0] - second_score:.3f}"
+                                )
+                        else:
+                            print(
+                                f"[REID HANDOFF AMBIGUOUS] {source_camera}->{target_camera} "
+                                f"best_journey={best[1]} best_track={best[2]} "
+                                f"best_score={best[0]:.3f} second_score={second_score:.3f} "
+                                f"required_margin={min_margin:.3f}; keep searching"
+                            )
+                    elif pending_items and arrival_items:
                         print(
-                            f"[BARRIER FIFO MATCH] journey={journey_id} "
-                            f"{source_camera}->{target_camera} track={candidate_id} "
-                            f"arrival_frame={arrival_frame}"
-                            + (" status=identified" if journey_id > 0 else " status=unidentified_continuing")
+                            f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
+                            f"pending={len(pending_items)} arrived={len(arrival_items)} "
+                            "reason=insufficient_features_or_below_threshold"
                         )
                     if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
@@ -815,6 +835,20 @@ def main() -> None:
                 for stale_key in stale_keys:
                     stale_track_id = stale_key[1]
                     global_id = journey_by_track.get(stale_key)
+                    if (
+                        camera_id == 2
+                        and global_id is not None
+                        and stale_key not in camera2_feature_closed_tracks
+                    ):
+                        # Losing a local detection is NOT a topology transition.
+                        # Preserve the journey/gallery state until this exact track
+                        # crosses its configured EXIT line or the run ends.
+                        track_last_seen.pop(stale_key, None)
+                        print(
+                            f"[GALLERY WAITING FOR EXIT] camera=2 track={stale_track_id} "
+                            f"journey={global_id} reason=track_lost_without_line_crossing"
+                        )
+                        continue
                     if camera_id in GALLERY_CAMERAS and global_id is not None:
                         finish_gallery(camera_id, stale_track_id, global_id)
                     elif camera_id in FEATURE_CAMERAS:
@@ -833,10 +867,6 @@ def main() -> None:
                     movement_state.pop(stale_key, None)
                     if camera_id == 1:
                         sessions.release_camera1_track(stale_track_id)
-                    if camera_id == 2:
-                        completed = sessions.finish_on_camera2_track_lost(stale_track_id)
-                        if completed:
-                            registration_completed = True
 
                 # Keep feature gallery closure in sync if the track was lost without an EXIT.
                 if camera_id in FEATURE_CAMERAS:
