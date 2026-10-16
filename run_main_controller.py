@@ -253,10 +253,19 @@ def main() -> None:
             plate, confidence = best_plate(journey_plate_votes[int(journey_number)])
         else:
             plate, confidence = best_plate(local_votes)
+        vote_summary = {
+            text: len(scores) for text, scores in (
+                journey_plate_votes[int(journey_number)].items()
+                if journey_number is not None else local_votes.items()
+            )
+        }
         print(
-            f"[REGISTRATION DATA] journey={journey_number if journey_number is not None else '-'} "
+            f"[REGISTRATION DATA SNAPSHOT] journey={journey_number if journey_number is not None else '-'} "
             f"camera={camera_id} track={track_id} features={feature_count} "
-            f"plate={plate} ocr_conf={confidence:.2f}"
+            f"local_plate_votes={sum(len(scores) for scores in local_votes.values())} "
+            f"journey_plate_votes={sum(vote_summary.values())} "
+            f"plate={plate} ocr_conf={confidence:.2f} vote_counts={vote_summary} "
+            f"note=state_at_gallery_close_not_final"
         )
         plate_votes.pop((camera_id, int(track_id)), None)
 
@@ -501,19 +510,62 @@ def main() -> None:
                             if int(tid) in active_ids
                             and feature_managers[camera_id].is_in_zone(camera_id, box)
                         ]
-                        for tid, reading in plate_ocr.recognize(frame, scan_zone_tracks).items():
-                            if reading.ocr_confidence >= Config.OCR_MIN_CHAR_CONFIDENCE:
-                                plate_votes[(camera_id, int(tid))][reading.text].append(
-                                    float(reading.ocr_confidence)
+                        ocr_readings = plate_ocr.recognize(frame, scan_zone_tracks)
+                        readings_by_track = {int(tid): reading for tid, reading in ocr_readings.items()}
+                        for tid, _bbox in scan_zone_tracks:
+                            reading = readings_by_track.get(int(tid))
+                            global_id = journey_by_track.get((camera_id, int(tid)))
+                            track_key = (camera_id, int(tid))
+                            if reading is None:
+                                print(
+                                    f"[OCR DIAG] camera={camera_id} frame={frame_id} "
+                                    f"video_time={camera_times.get(camera_id, 0.0):.3f} "
+                                    f"track={tid} journey={global_id if global_id is not None else '-'} "
+                                    f"result=NO_READING reason=no_plate_detection_or_empty_ocr"
                                 )
-                                global_id = journey_by_track.get((camera_id, int(tid)))
-                                if global_id is not None:
-                                    journey_plate_votes[int(global_id)][reading.text].append(float(reading.ocr_confidence))
-                                    if database is not None:
-                                        database.update_plate(
-                                            global_id, camera_id, int(tid), frame_id, reading.text,
-                                            reading.ocr_confidence, reading.plate_confidence, reading.subtype,
-                                        )
+                                continue
+
+                            accepted = reading.ocr_confidence >= Config.OCR_MIN_CHAR_CONFIDENCE
+                            if not accepted:
+                                print(
+                                    f"[OCR DIAG] camera={camera_id} frame={frame_id} "
+                                    f"video_time={camera_times.get(camera_id, 0.0):.3f} "
+                                    f"track={tid} journey={global_id if global_id is not None else '-'} "
+                                    f"text={reading.text} char_conf={reading.ocr_confidence:.3f} "
+                                    f"plate_conf={reading.plate_confidence:.3f} "
+                                    f"threshold={Config.OCR_MIN_CHAR_CONFIDENCE:.3f} "
+                                    f"result=REJECT reason=char_conf_below_threshold"
+                                )
+                                continue
+
+                            plate_votes[track_key][reading.text].append(float(reading.ocr_confidence))
+                            local_plate, local_conf = best_plate(plate_votes[track_key])
+                            journey_vote_count = 0
+                            if global_id is not None:
+                                journey_plate_votes[int(global_id)][reading.text].append(float(reading.ocr_confidence))
+                                journey_vote_count = sum(
+                                    len(scores) for scores in journey_plate_votes[int(global_id)].values()
+                                )
+                                if database is not None:
+                                    database.update_plate(
+                                        global_id, camera_id, int(tid), frame_id, reading.text,
+                                        reading.ocr_confidence, reading.plate_confidence, reading.subtype,
+                                    )
+                            journey_plate, journey_conf = (
+                                best_plate(journey_plate_votes[int(global_id)])
+                                if global_id is not None else (local_plate, local_conf)
+                            )
+                            print(
+                                f"[OCR DIAG] camera={camera_id} frame={frame_id} "
+                                f"video_time={camera_times.get(camera_id, 0.0):.3f} "
+                                f"track={tid} journey={global_id if global_id is not None else '-'} "
+                                f"text={reading.text} char_conf={reading.ocr_confidence:.3f} "
+                                f"plate_conf={reading.plate_confidence:.3f} subtype={reading.subtype!r} "
+                                f"local_votes={sum(len(v) for v in plate_votes[track_key].values())} "
+                                f"journey_votes={journey_vote_count} "
+                                f"best_journey_plate={journey_plate} best_journey_conf={journey_conf:.3f} "
+                                f"result=ACCEPT"
+                            )
 
                 # Camera 1 is a plate-scanning station, not a topology node. Its poor
                 # overview must not create downstream handoff tasks.
@@ -526,6 +578,21 @@ def main() -> None:
                         for journey_id, votes in journey_plate_votes.items()
                     }
                     for sampled_track_id, vector in sampled_embeddings:
+                        sampled_key = (camera_id, int(sampled_track_id))
+                        assigned_journey = journey_by_track.get(sampled_key)
+                        if assigned_journey is not None and assigned_journey > 0:
+                            # This track already belongs to a registered journey through
+                            # the scan FIFO/topology handoff. Do not compare it against
+                            # every identity gallery merely because it is on camera 2+.
+                            continue
+                        print(
+                            f"[REID DIAG START] camera={camera_id} frame={frame_id} "
+                            f"track={sampled_track_id} journey="
+                            f"{assigned_journey if assigned_journey is not None else '-'} "
+                            f"reason={'provisional_unidentified' if assigned_journey is not None else 'not_yet_bound'} "
+                            f"query_samples={len(runtime_reid.track_features.get(sampled_key, []))} "
+                            f"gallery_count={len(runtime_reid.identity_gallery)}"
+                        )
                         runtime_reid.log_feature_against_all_identities(
                             camera_id, int(sampled_track_id), vector, identity_labels
                         )
