@@ -852,6 +852,11 @@ def main() -> None:
                 # topology tracker at all. Only topology cameras expose dropped_tracks.
                 if camera_id in transition_trackers:
                     for dropped_track_id in transition_trackers[camera_id].detector.dropped_tracks:
+                        dropped_key = (camera_id, int(dropped_track_id))
+                        # A detector timeout is not proof of a camera transition. Keep
+                        # samples for an assigned journey until its EXIT event arrives.
+                        if camera_id != 1 and dropped_key in journey_by_track:
+                            continue
                         runtime_reid.forget_track(camera_id, int(dropped_track_id))
 
                 stale_keys = [
@@ -861,18 +866,14 @@ def main() -> None:
                 for stale_key in stale_keys:
                     stale_track_id = stale_key[1]
                     global_id = journey_by_track.get(stale_key)
-                    if (
-                        camera_id == 2
-                        and stale_key not in camera2_feature_closed_tracks
-                    ):
+                    if camera_id != 1 and global_id is not None:
                         # Losing a local detection is NOT a topology transition.
                         # Preserve the journey/gallery state until this exact track
                         # crosses its configured EXIT line or the run ends.
                         track_last_seen.pop(stale_key, None)
                         print(
-                            f"[GALLERY WAITING FOR EXIT] camera=2 track={stale_track_id} "
-                            f"journey={global_id if global_id is not None else '-'} "
-                            f"reason=track_lost_without_line_crossing"
+                            f"[GALLERY WAITING FOR EXIT] camera={camera_id} track={stale_track_id} "
+                            f"journey={global_id} reason=track_lost_without_line_crossing"
                         )
                         continue
                     if camera_id in GALLERY_CAMERAS and global_id is not None:
@@ -1039,7 +1040,7 @@ def main() -> None:
                 sample_count = len(gallery.get("original", [])) + len(gallery.get("flipped", []))
                 if global_id is not None and cam in GALLERY_CAMERAS:
                     runtime_reid.add_identity_gallery(global_id, gallery)
-                    if database is not None:
+                    if database is not None and global_id > 0:
                         for mirrored, key_name in ((False, "original"), (True, "flipped")):
                             for vector in gallery.get(key_name, []):
                                 database.save_embedding(global_id, cam, track_id, frame_ids.get(cam, 0), vector, mirrored)
