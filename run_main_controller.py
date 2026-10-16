@@ -514,6 +514,19 @@ def main() -> None:
 
                 # Camera 1 is a plate-scanning station, not a topology node. Its poor
                 # overview must not create downstream handoff tasks.
+                # Diagnostic Re-ID: compare each newly accepted single-vector observation
+                # against every registered vehicle gallery and print the best cosine score.
+                # FIFO still controls identity handoff; these scores are informational only.
+                if camera_id != 1 and sampled_embeddings:
+                    identity_labels = {
+                        int(journey_id): best_plate(votes)[0]
+                        for journey_id, votes in journey_plate_votes.items()
+                    }
+                    for sampled_track_id, vector in sampled_embeddings:
+                        runtime_reid.log_feature_against_all_identities(
+                            camera_id, int(sampled_track_id), vector, identity_labels
+                        )
+
                 # Persist new moving-track embeddings after the scan-zone binding check.
                 if database is not None:
                     for sampled_track_id, vector in sampled_embeddings:
