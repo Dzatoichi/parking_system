@@ -833,11 +833,17 @@ def main() -> None:
                                     f"margin={best[0] - second_score:.3f}"
                                 )
                         else:
+                            reason = (
+                                "below_similarity_threshold"
+                                if best[0] < runtime_reid.threshold
+                                else "ambiguous_score_margin"
+                            )
                             print(
-                                f"[REID HANDOFF AMBIGUOUS] {source_camera}->{target_camera} "
+                                f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                                 f"best_journey={best[1]} best_track={best[2]} "
-                                f"best_score={best[0]:.3f} second_score={second_score:.3f} "
-                                f"required_margin={min_margin:.3f}; keep searching"
+                                f"best_score={best[0]:.3f} threshold={runtime_reid.threshold:.3f} "
+                                f"second_score={second_score:.3f} required_margin={min_margin:.3f} "
+                                f"reason={reason}; keep searching"
                             )
                     elif pending_items and arrival_items:
                         print(
