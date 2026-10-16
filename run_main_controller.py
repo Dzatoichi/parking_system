@@ -420,125 +420,88 @@ def main() -> None:
                     ):
                         scan_zone_active_cameras.add(camera_id)
                     if camera_id == 2:
-                        # Camera 1 -> 2 candidate generation uses the configured scan
-                        # lane and entry time; ReID, not queue order, decides identity.
+                        # Camera 1 -> 2 intentionally uses FIFO: the configured LEFT/RIGHT
+                        # scan zones provide the spatial constraint, and first-zone-entry
+                        # time orders vehicles within each lane. Do not use ReID here.
                         fifo_ttl = max(1, int(getattr(Config, "SCAN_FIFO_TTL_FRAMES", 900)))
                         fresh_scan_queue = []
                         for pending_global_id, pending_session_id, created_camera2_frame, pending_lane in scan_pending:
-                            if frame_id - created_camera2_frame > fifo_ttl:
+                            waited = frame_id - created_camera2_frame
+                            if waited > fifo_ttl:
                                 print(
-                                    f"[SCAN REID EXPIRED] global_id={pending_global_id} "
-                                    f"waited_frames={frame_id - created_camera2_frame}"
+                                    f"[SCAN FIFO EXPIRED] global_id={pending_global_id} "
+                                    f"waited_frames={waited} lane={pending_lane}"
                                 )
                                 scan_source_track_by_journey.pop(int(pending_global_id), None)
                                 if database is not None:
                                     database.record_event(
-                                        2, -1, frame_id, "scan_reid_expired",
+                                        2, -1, frame_id, "scan_fifo_expired",
                                         global_id=pending_global_id, source_camera_id=1, target_camera_id=2,
-                                        details={"target_frames_waited": int(frame_id - created_camera2_frame)},
+                                        details={"target_frames_waited": int(waited), "lane": pending_lane},
                                     )
                             else:
-                                fresh_scan_queue.append((pending_global_id, pending_session_id, created_camera2_frame, pending_lane))
+                                fresh_scan_queue.append(
+                                    (pending_global_id, pending_session_id, created_camera2_frame, pending_lane)
+                                )
                         scan_pending[:] = fresh_scan_queue
 
                         in_zone_tracks = []
                         for scan_track_id, scan_bbox in tracks:
                             lane = feature_managers[2]._matching_profile(2, scan_bbox)
-                            if lane is not None:
-                                scan_key = (2, int(scan_track_id))
-                                scan_zone_first_seen.setdefault(scan_key, int(frame_id))
-                                in_zone_tracks.append((int(scan_track_id), lane))
+                            if lane is None:
+                                continue
+                            scan_key = (2, int(scan_track_id))
+                            first_seen = scan_zone_first_seen.setdefault(scan_key, int(frame_id))
+                            if scan_key not in journey_by_track:
+                                in_zone_tracks.append((int(first_seen), int(scan_track_id), lane))
+                        in_zone_tracks.sort(key=lambda item: (item[0], item[1]))
 
                         max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
-                        min_margin = float(getattr(Config, "REID_MATCH_MIN_MARGIN", 0.04))
-                        scan_scores = []
-                        for pending_index, (global_id, session_id, created_frame, pending_lane) in enumerate(scan_pending):
-                            source_track_id = scan_source_track_by_journey.get(int(global_id))
-                            if source_track_id is None:
+                        # FIFO is lane-local: a LEFT arrival can never consume a RIGHT
+                        # registration. Keep searching when a lane has no eligible track.
+                        for pending_index, (global_id, session_id, created_frame, pending_lane) in enumerate(list(scan_pending)):
+                            eligible = [
+                                item for item in in_zone_tracks
+                                if item[2] == pending_lane
+                                and item[0] >= created_frame - max_early_frames
+                            ]
+                            if not eligible:
                                 continue
-                            source_gallery = feature_managers[1]._galleries.get((1, int(source_track_id)))
-                            source_vectors = []
-                            if source_gallery is not None:
-                                source_vectors = list(source_gallery.original) + list(source_gallery.flipped)
-                            else:
-                                source_vectors = list(runtime_reid.identity_gallery.get(int(global_id), []))
-                            if len(source_vectors) < runtime_reid.min_samples:
+                            first_seen, scan_track_id, lane = eligible[0]
+                            key = (2, scan_track_id)
+                            if key in journey_by_track:
+                                in_zone_tracks = [item for item in in_zone_tracks if item[1] != scan_track_id]
                                 continue
-
-                            for scan_track_id, lane in in_zone_tracks:
-                                if lane != pending_lane:
-                                    continue
-                                key = (2, int(scan_track_id))
-                                if key in journey_by_track:
-                                    continue
-                                first_seen = scan_zone_first_seen.get(key, frame_id)
-                                if first_seen < created_frame - max_early_frames:
-                                    continue
-                                target_gallery = feature_managers[2]._galleries.get(key)
-                                if target_gallery is None:
-                                    continue
-                                target_vectors = list(target_gallery.original) + list(target_gallery.flipped)
-                                if len(target_gallery.original) < runtime_reid.min_samples:
-                                    continue
-                                score, _mean_topk = RuntimeReID._similarity_scores(target_vectors, source_vectors)
-                                if score >= 0.0:
-                                    scan_scores.append((
-                                        float(score), int(global_id), int(scan_track_id),
-                                        int(pending_index), int(frame_id), int(first_seen)
-                                    ))
-
-                        scan_scores.sort(key=lambda item: item[0], reverse=True)
-                        if scan_scores:
-                            best = scan_scores[0]
-                            second_score = scan_scores[1][0] if len(scan_scores) > 1 else -1.0
-                            if best[0] >= runtime_reid.threshold and best[0] - second_score >= min_margin:
-                                score, global_id, scan_track_id, pending_index, _frame_now, first_seen = best
-                                key = (2, scan_track_id)
-                                if key not in journey_by_track:
-                                    _gid, session_id, _created_frame, _lane = scan_pending.pop(pending_index)
-                                    journey_by_track[key] = global_id
-                                    scan_source_track_by_journey.pop(global_id, None)
-                                    scan_camera2_journeys.add(global_id)
-                                    newly_bound_tracks.add(key)
-                                    try:
-                                        sessions.bind_track(session_id, 2, scan_track_id)
-                                    except (KeyError, ValueError) as exc:
-                                        print(f"[SCAN REID WARNING] {exc}")
-                                    if database is not None:
-                                        database.record_event(
-                                            2, scan_track_id, frame_id, "scan_zone_reid_bind",
-                                            global_id=global_id, source_camera_id=1, target_camera_id=2,
-                                            movement_state="moving" if movement_state.get(key, False) else "stationary",
-                                            details={
-                                                "match_method": "lane+reid",
-                                                "cosine_similarity": round(score, 4),
-                                                "score_margin": round(best[0] - second_score, 4),
-                                                "lane": _lane,
-                                                "first_zone_frame": first_seen,
-                                            },
-                                        )
-                                    print(
-                                        f"[SCAN REID MATCH] global_id={global_id} camera=1->2 "
-                                        f"local_track={scan_track_id} lane={_lane} "
-                                        f"cosine={score:.3f} margin={best[0] - second_score:.3f}"
-                                    )
-                            else:
-                                reason = (
-                                    "below_similarity_threshold"
-                                    if best[0] < runtime_reid.threshold
-                                    else "ambiguous_score_margin"
+                            # Remove the exact pending item and target track; never fall back
+                            # across lanes or assign a track twice.
+                            try:
+                                scan_pending.remove((global_id, session_id, created_frame, pending_lane))
+                            except ValueError:
+                                continue
+                            journey_by_track[key] = global_id
+                            scan_source_track_by_journey.pop(int(global_id), None)
+                            scan_camera2_journeys.add(global_id)
+                            newly_bound_tracks.add(key)
+                            in_zone_tracks = [item for item in in_zone_tracks if item[1] != scan_track_id]
+                            try:
+                                sessions.bind_track(session_id, 2, scan_track_id)
+                            except (KeyError, ValueError) as exc:
+                                print(f"[SCAN FIFO WARNING] {exc}")
+                            if database is not None:
+                                database.record_event(
+                                    2, scan_track_id, frame_id, "scan_zone_fifo_bind",
+                                    global_id=global_id, source_camera_id=1, target_camera_id=2,
+                                    movement_state="moving" if movement_state.get(key, False) else "stationary",
+                                    details={
+                                        "match_method": "lane+fifo",
+                                        "lane": lane,
+                                        "first_zone_frame": first_seen,
+                                        "registration_target_frame": created_frame,
+                                    },
                                 )
-                                print(
-                                    f"[SCAN REID WAIT] best_journey={best[1]} best_track={best[2]} "
-                                    f"score={best[0]:.3f} threshold={runtime_reid.threshold:.3f} "
-                                    f"second_score={second_score:.3f} required_margin={min_margin:.3f} "
-                                    f"reason={reason}"
-                                )
-                        elif scan_pending and in_zone_tracks:
                             print(
-                                f"[SCAN REID WAIT] pending={len(scan_pending)} "
-                                f"candidates={len(in_zone_tracks)} "
-                                "reason=insufficient_gallery_or_samples"
+                                f"[SCAN FIFO MATCH] global_id={global_id} camera=1->2 "
+                                f"local_track={scan_track_id} lane={lane} first_zone_frame={first_seen}"
                             )
                     # Camera-2 gallery closure is handled only by the topology EXIT
                     # command below for this exact track. Frame edges are not transitions.
