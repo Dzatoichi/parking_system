@@ -148,6 +148,9 @@ def main() -> None:
     movement_last_seen: dict[tuple[int, int], int] = {}
     track_last_seen: dict[tuple[int, int], int] = {}
     camera2_interior_seen: set[tuple[int, int]] = set()
+    # First frame each camera-2 track enters a scan lane; FIFO order must not
+    # depend on camera-local tracker IDs, which are arbitrary identifiers.
+    scan_zone_first_seen: dict[tuple[int, int], int] = {}
     camera2_feature_closed_tracks: set[tuple[int, int]] = set()
     # Camera 1 remains the persistent scan/trigger view; the second tile follows
     # the current downstream search destination. Cached tiles survive idle skips.
@@ -419,8 +422,14 @@ def main() -> None:
                         for scan_track_id, scan_bbox in tracks:
                             lane = feature_managers[2]._matching_profile(2, scan_bbox)
                             if lane is not None:
+                                scan_key = (2, int(scan_track_id))
+                                scan_zone_first_seen.setdefault(scan_key, int(frame_id))
                                 in_zone_tracks.append((int(scan_track_id), lane))
-                        for scan_track_id, lane in sorted(in_zone_tracks):
+                        # Actual first zone-entry time, not local track ID, defines FIFO.
+                        for scan_track_id, lane in sorted(
+                            in_zone_tracks,
+                            key=lambda item: (scan_zone_first_seen.get((2, item[0]), frame_id), item[0]),
+                        ):
                             key = (2, int(scan_track_id))
                             if key in journey_by_track:
                                 continue
@@ -722,6 +731,7 @@ def main() -> None:
                     runtime_reid.forget_track(camera_id, stale_track_id)
                     camera2_feature_closed_tracks.discard(stale_key)
                     camera2_interior_seen.discard(stale_key)
+                    scan_zone_first_seen.pop(stale_key, None)
                     movement_last_seen.pop(stale_key, None)
                     last_centers.pop(stale_key, None)
                     movement_scores.pop(stale_key, None)
