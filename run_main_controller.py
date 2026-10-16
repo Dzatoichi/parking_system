@@ -241,17 +241,18 @@ def main() -> None:
                 # Keep a temporary appearance gallery for unidentified journeys too;
                 # ReID can propagate a provisional journey without inventing a plate.
                 runtime_reid.add_identity_gallery(int(journey_number), gallery)
+            if database is not None and journey_number is not None and journey_number > 0:
+                for mirrored, key_name in ((False, "original"), (True, "flipped")):
+                    for vector in gallery.get(key_name, []):
+                        database.save_embedding(journey_number, camera_id, track_id, frame_id, vector, mirrored)
+            session_id = session_for_journey(journey_number) if journey_number is not None else None
+            if session_id:
+                sessions.attach_gallery(session_id, camera_id, gallery)
         elif journey_number is not None:
             # If the feature-zone gallery was never activated, preserve the sampled
             # moving-track embeddings as the provisional/registered journey gallery.
             runtime_reid.extend_identity(int(journey_number), camera_id, int(track_id))
-                if database is not None:
-                    for mirrored, key_name in ((False, "original"), (True, "flipped")):
-                        for vector in gallery.get(key_name, []):
-                            database.save_embedding(journey_number, camera_id, track_id, frame_id, vector, mirrored)
-            session_id = session_for_journey(journey_number) if journey_number is not None else None
-            if session_id:
-                sessions.attach_gallery(session_id, camera_id, gallery)
+
         local_votes = plate_votes.get((camera_id, int(track_id)), {})
         if journey_number is not None:
             for text, scores in local_votes.items():
