@@ -104,7 +104,7 @@ def main() -> None:
         features,
         threshold=Config.REID_SIMILARITY_THRESHOLD,
         sample_every=max(1, int(getattr(Config, "RUNTIME_REID_EVERY_N_FRAMES", 2))),
-        min_samples=max(1, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 1))),
+        min_samples=max(2, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 2))),
     )
     plate_ocr = PlateOCRTracker(
         plate_model_path=Config.YOLO_PLATE_MODEL_PATH,
@@ -241,6 +241,10 @@ def main() -> None:
                 # Keep a temporary appearance gallery for unidentified journeys too;
                 # ReID can propagate a provisional journey without inventing a plate.
                 runtime_reid.add_identity_gallery(int(journey_number), gallery)
+        elif journey_number is not None:
+            # If the feature-zone gallery was never activated, preserve the sampled
+            # moving-track embeddings as the provisional/registered journey gallery.
+            runtime_reid.extend_identity(int(journey_number), camera_id, int(track_id))
                 if database is not None:
                     for mirrored, key_name in ((False, "original"), (True, "flipped")):
                         for vector in gallery.get(key_name, []):
@@ -637,6 +641,10 @@ def main() -> None:
                                 f"reason=search_handoff from={command.source_camera} "
                                 f"journey={journey_number}"
                             )
+                        if command.source_camera == 2:
+                            # Mark closure only for the track that emitted this EXIT event.
+                            camera2_feature_closed_tracks.add(source_key)
+                            camera2_interior_seen.discard(source_key)
                         finish_gallery(command.source_camera, command.track_id, journey_number)
                         # Camera 1 has no topology transitions. Topology EXIT advances the search;
                         # Re-ID is diagnostic and must never block the next-camera handoff.
@@ -697,7 +705,7 @@ def main() -> None:
                         )
 
                 # Resolve each directed barrier independently using topology-gated ReID scores.
-                # Re-ID similarity cannot block propagation of a registered vehicle's plate.
+                # Low-confidence or ambiguous matches stay unresolved; never fall back to FIFO.
                 for (source_camera, target_camera), pending_items in list(pending_reid.items()):
                     if target_camera != camera_id or not pending_items:
                         continue
@@ -739,11 +747,16 @@ def main() -> None:
                     # have crossed the ENTER line from this exact source camera and be
                     # inside the TTL window. Identity is decided by Re-ID, never queue order.
                     min_margin = float(getattr(Config, "REID_MATCH_MIN_MARGIN", 0.04))
+                    max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 30)))
                     scored_pairs = []
-                    for pending_index, (journey_id, _created_target_frame) in enumerate(pending_items):
+                    for pending_index, (journey_id, created_target_frame) in enumerate(pending_items):
                         if journey_id == 0 or not runtime_reid.identity_gallery.get(int(journey_id)):
                             continue
                         for arrival_index, (candidate_id, arrival_frame) in enumerate(arrival_items):
+                            # Do not steal a track that crossed the target ENTER line
+                            # long before this source EXIT created the search task.
+                            if arrival_frame < created_target_frame - max_early_frames:
+                                continue
                             key = (target_camera, int(candidate_id))
                             if key in journey_by_track:
                                 continue
@@ -839,7 +852,6 @@ def main() -> None:
                     global_id = journey_by_track.get(stale_key)
                     if (
                         camera_id == 2
-                        and global_id is not None
                         and stale_key not in camera2_feature_closed_tracks
                     ):
                         # Losing a local detection is NOT a topology transition.
@@ -848,7 +860,8 @@ def main() -> None:
                         track_last_seen.pop(stale_key, None)
                         print(
                             f"[GALLERY WAITING FOR EXIT] camera=2 track={stale_track_id} "
-                            f"journey={global_id} reason=track_lost_without_line_crossing"
+                            f"journey={global_id if global_id is not None else '-'} "
+                            f"reason=track_lost_without_line_crossing"
                         )
                         continue
                     if camera_id in GALLERY_CAMERAS and global_id is not None:
