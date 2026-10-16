@@ -129,7 +129,9 @@ def main() -> None:
     # Labels describe a journey, not a camera-local BoT-SORT ID.
     journey_by_track: dict[tuple[int, int], int] = {}
     session_by_journey: dict[int, str] = {}
+    # Independent FIFO queues for each directed camera-to-camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    arrived_fifo: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -608,13 +610,15 @@ def main() -> None:
                                 movement_state="moving" if movement_state.get((command.camera_id, int(command.track_id)), False) else "stationary",
                                 bbox=next((box for tid, box in tracks if int(tid) == int(command.track_id)), None),
                             )
+                        pair = (int(command.source_camera), int(command.camera_id))
+                        arrived_fifo[pair].append((int(command.track_id), int(command.frame_id)))
                         print(
-                            f"[REID CANDIDATE GATE] {command.source_camera}->{command.camera_id} "
-                            f"local_track={command.track_id}; waiting for moving-track appearance match"
+                            f"[BARRIER FIFO ARRIVAL] {pair[0]}->{pair[1]} "
+                            f"track={command.track_id} position={len(arrived_fifo[pair])}"
                         )
 
-                # Resolve only topology-eligible destination tracks against pending journeys.
-                # A target track must have crossed an ENTER line from this exact source camera.
+                # Resolve each directed barrier independently using arrival order.
+                # Re-ID similarity cannot block propagation of a registered vehicle's plate.
                 for (source_camera, target_camera), pending_items in list(pending_reid.items()):
                     if target_camera != camera_id or not pending_items:
                         continue
@@ -646,57 +650,50 @@ def main() -> None:
                     if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
                         continue
-                    journey_ids = [journey_id for journey_id, _ in pending_items]
-                    candidate_ids = transition_trackers[camera_id].tracks_arrived_from(source_camera)
-                    scored = []
-                    for candidate_id in candidate_ids:
-                        if (camera_id, int(candidate_id)) in journey_by_track:
+                    arrival_items = arrived_fifo[(source_camera, target_camera)]
+                    arrival_items[:] = [
+                        item for item in arrival_items
+                        if frame_id - item[1] <= ttl
+                        and (target_camera, item[0]) not in journey_by_track
+                    ]
+                    while pending_items and arrival_items:
+                        journey_id, _created_target_frame = pending_items.pop(0)
+                        candidate_id, arrival_frame = arrival_items.pop(0)
+                        key = (target_camera, candidate_id)
+                        if key in journey_by_track:
                             continue
-                        if not movement_state.get((camera_id, int(candidate_id)), False):
-                            continue
-                        for journey_id in journey_ids:
-                            score = runtime_reid.match_track_to_journey(
-                                camera_id, int(candidate_id), int(journey_id)
-                            )
-                            if score is not None:
-                                scored.append((float(score), int(journey_id), int(candidate_id)))
-                    used_journeys, used_tracks = set(), set()
-                    for score, journey_id, candidate_id in sorted(scored, reverse=True):
-                        if journey_id in used_journeys or candidate_id in used_tracks:
-                            continue
-                        journey_by_track[(camera_id, candidate_id)] = journey_id
-                        if database is not None and camera_id not in GALLERY_CAMERAS:
-                            for vector in runtime_reid.track_features.get((camera_id, candidate_id), []):
-                                database.save_embedding(journey_id, camera_id, candidate_id, frame_id, vector)
+                        journey_by_track[key] = int(journey_id)
+                        if database is not None and target_camera not in GALLERY_CAMERAS:
+                            for vector in runtime_reid.track_features.get(key, []):
+                                database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
                         session_id = session_by_journey.get(journey_id)
                         if session_id:
                             current = sessions.get_session(session_id)
                             if current and current["status"] == "active":
                                 try:
-                                    sessions.bind_track(session_id, camera_id, candidate_id)
+                                    sessions.bind_track(session_id, target_camera, candidate_id)
                                 except (KeyError, ValueError) as exc:
                                     print(f"[SESSION BIND WARNING] {exc}")
-                        pending_items[:] = [
-                            item for item in pending_items if item[0] != journey_id
-                        ]
-                        used_journeys.add(journey_id)
-                        used_tracks.add(candidate_id)
                         if database is not None:
                             database.record_event(
-                                target_camera, candidate_id, frame_id, "reid_match",
+                                target_camera, candidate_id, frame_id, "fifo_handoff",
                                 global_id=journey_id, source_camera_id=source_camera,
-                                target_camera_id=target_camera, movement_state="moving", score=score,
+                                target_camera_id=target_camera,
+                                movement_state="moving" if movement_state.get(key, False) else "stationary",
+                                details={"arrival_frame": int(arrival_frame), "match_method": "fifo"},
                             )
                         reid_matches.append({
                             "journey_id": int(journey_id),
                             "source_camera": int(source_camera),
                             "target_camera": int(target_camera),
                             "target_track_id": int(candidate_id),
-                            "cosine_similarity": float(score),
+                            "cosine_similarity": None,
+                            "match_method": "fifo",
                         })
                         print(
-                            f"[REID MATCH] journey={journey_id} {source_camera}->{target_camera} "
-                            f"track={candidate_id} cosine={score:.3f}"
+                            f"[BARRIER FIFO MATCH] journey={journey_id} "
+                            f"{source_camera}->{target_camera} track={candidate_id} "
+                            f"arrival_frame={arrival_frame}"
                         )
                     if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
