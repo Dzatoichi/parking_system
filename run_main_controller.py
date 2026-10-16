@@ -668,7 +668,7 @@ def main() -> None:
                                 "target_frames_waited": int(frame_id - created_target_frame),
                             }
                             reid_expired.append(expired_record)
-                            if database is not None:
+                            if database is not None and journey_id > 0:
                                 database.record_event(
                                     target_camera, -1, frame_id, "reid_handoff_expired",
                                     global_id=journey_id, source_camera_id=source_camera,
@@ -794,18 +794,21 @@ def main() -> None:
                             plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
                             if plate != "UNKNOWN":
                                 draw_text_label(display, box, plate, color)
-                    elif global_id is not None:
+                    elif global_id is not None and global_id > 0:
                         # Identified vehicles remain green regardless of motion.
                         color = (0, 255, 0)
                         cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
                         plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
                         if plate != "UNKNOWN":
                             draw_text_label(display, box, plate, color)
-                    elif movement_state.get(key, False):
-                        # Moving but not yet identified: yellow with camera-local BoT-SORT ID.
+                    elif movement_state.get(key, False) or (global_id is not None and global_id < 0):
+                        # Unidentified but actively tracked vehicles remain visible in yellow.
+                        # A negative provisional journey means the vehicle is being followed
+                        # downstream, but no registered identity/plate has been confirmed.
                         color = (0, 255, 255)
                         cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-                        draw_text_label(display, box, f"LOCAL {track_id}", color)
+                        provisional = f"LOCAL {track_id} | SEARCHING" if global_id is not None and global_id < 0 else f"LOCAL {track_id}"
+                        draw_text_label(display, box, provisional, color)
                     else:
                         # Stationary vehicles: red, no label.
                         color = (0, 0, 255)
