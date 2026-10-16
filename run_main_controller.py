@@ -4,6 +4,8 @@ Camera 1 registers vehicles and reads plates. Camera 1 -> 2 uses FIFO constraine
 LEFT/RIGHT scan lanes and first zone-entry time. Camera 3 currently uses FIFO for
 topology handoffs; other downstream camera pairs use topology-gated ReID. OCR runs on
 camera 1 only.
+"""
+
 from __future__ import annotations
 
 from collections import Counter, defaultdict
