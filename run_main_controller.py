@@ -748,7 +748,7 @@ def main() -> None:
                     # have crossed the ENTER line from this exact source camera and be
                     # inside the TTL window. Identity is decided by Re-ID, never queue order.
                     min_margin = float(getattr(Config, "REID_MATCH_MIN_MARGIN", 0.04))
-                    max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 30)))
+                    max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
                     scored_pairs = []
                     for pending_index, (journey_id, created_target_frame) in enumerate(pending_items):
                         if journey_id == 0 or not runtime_reid.identity_gallery.get(int(journey_id)):
@@ -861,7 +861,11 @@ def main() -> None:
                         dropped_key = (camera_id, int(dropped_track_id))
                         # A detector timeout is not proof of a camera transition. Keep
                         # samples for an assigned journey until its EXIT event arrives.
-                        if camera_id != 1 and dropped_key in journey_by_track:
+                        has_open_gallery = (
+                            camera_id in FEATURE_CAMERAS
+                            and dropped_key in getattr(feature_managers[camera_id], "_galleries", {})
+                        )
+                        if camera_id != 1 and (dropped_key in journey_by_track or has_open_gallery):
                             continue
                         runtime_reid.forget_track(camera_id, int(dropped_track_id))
 
@@ -872,7 +876,11 @@ def main() -> None:
                 for stale_key in stale_keys:
                     stale_track_id = stale_key[1]
                     global_id = journey_by_track.get(stale_key)
-                    if camera_id != 1 and global_id is not None:
+                    has_open_gallery = (
+                        camera_id in FEATURE_CAMERAS
+                        and stale_key in getattr(feature_managers[camera_id], "_galleries", {})
+                    )
+                    if camera_id != 1 and (global_id is not None or has_open_gallery):
                         # Losing a local detection is NOT a topology transition.
                         # Preserve the journey/gallery state until this exact track
                         # crosses its configured EXIT line or the run ends.
