@@ -1,10 +1,9 @@
-"""Nine-camera controller: camera-1 registration gallery, downstream Re-ID and topology handoffs.
+"""Nine-camera controller with lane-constrained scan FIFO and topology handoffs.
 
-Camera 1 assigns global identities, reads plates and builds the initial Re-ID gallery,
-but does not participate in downstream topology tracking. Camera 2 binds scan entries
-using scan-lane geometry plus ReID and contributes gallery features; cameras 2-9 track
-routes using topology-gated ReID handoffs. OCR runs on camera 1 only.
-"""
+Camera 1 registers vehicles and reads plates. Camera 1 -> 2 uses FIFO constrained by
+LEFT/RIGHT scan lanes and first zone-entry time. Camera 3 currently uses FIFO for
+topology handoffs; other downstream camera pairs use topology-gated ReID. OCR runs on
+camera 1 only.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -514,7 +513,7 @@ def main() -> None:
                                 start_registration(int(tid), frame_id, tracks)
                     if camera_id in OCR_CAMERAS and frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
                         # Plate OCR is performed only at the entry camera. Camera 2
-                        # inherits the plate only after lane-gated ReID confirms the track.
+                        # inherits the registered identity after lane-constrained FIFO binding.
                         scan_zone_tracks = [
                             (int(tid), box) for tid, box in zip(ids, boxes)
                             if int(tid) in active_ids
