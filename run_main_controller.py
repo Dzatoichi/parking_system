@@ -237,7 +237,9 @@ def main() -> None:
         if gallery is not None:
             feature_closed[camera_id] += 1
             feature_count = len(gallery.get("original", [])) + len(gallery.get("flipped", []))
-            if journey_number is not None and journey_number > 0 and camera_id in GALLERY_CAMERAS:
+            if journey_number is not None and camera_id in GALLERY_CAMERAS:
+                # Keep a temporary appearance gallery for unidentified journeys too;
+                # ReID can propagate a provisional journey without inventing a plate.
                 runtime_reid.add_identity_gallery(int(journey_number), gallery)
                 if database is not None:
                     for mirrored, key_name in ((False, "original"), (True, "flipped")):
@@ -638,7 +640,7 @@ def main() -> None:
                         finish_gallery(command.source_camera, command.track_id, journey_number)
                         # Camera 1 has no topology transitions. Topology EXIT advances the search;
                         # Re-ID is diagnostic and must never block the next-camera handoff.
-                        if journey_number > 0 and command.source_camera not in GALLERY_CAMERAS:
+                        if command.source_camera not in GALLERY_CAMERAS:
                             runtime_reid.extend_identity(
                                 journey_number, command.source_camera, command.track_id
                             )
@@ -739,7 +741,7 @@ def main() -> None:
                     min_margin = float(getattr(Config, "REID_MATCH_MIN_MARGIN", 0.04))
                     scored_pairs = []
                     for pending_index, (journey_id, _created_target_frame) in enumerate(pending_items):
-                        if journey_id <= 0:
+                        if journey_id == 0 or not runtime_reid.identity_gallery.get(int(journey_id)):
                             continue
                         for arrival_index, (candidate_id, arrival_frame) in enumerate(arrival_items):
                             key = (target_camera, int(candidate_id))
@@ -767,7 +769,7 @@ def main() -> None:
                                 pending_items.pop(pending_index)
                                 arrival_items.pop(arrival_index)
                                 journey_by_track[key] = journey_id
-                                if database is not None and target_camera not in GALLERY_CAMERAS:
+                                if database is not None and journey_id > 0 and target_camera not in GALLERY_CAMERAS:
                                     for vector in runtime_reid.track_features.get(key, []):
                                         database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
                                 session_id = session_by_journey.get(journey_id)
@@ -778,7 +780,7 @@ def main() -> None:
                                             sessions.bind_track(session_id, target_camera, candidate_id)
                                         except (KeyError, ValueError) as exc:
                                             print(f"[SESSION BIND WARNING] {exc}")
-                                if database is not None:
+                                if database is not None and journey_id > 0:
                                     database.record_event(
                                         target_camera, candidate_id, frame_id, "reid_handoff",
                                         global_id=journey_id, source_camera_id=source_camera,
