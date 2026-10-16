@@ -129,6 +129,9 @@ def main() -> None:
     # Labels describe a journey, not a camera-local BoT-SORT ID.
     journey_by_track: dict[tuple[int, int], int] = {}
     session_by_journey: dict[int, str] = {}
+    # Negative IDs are provisional, unrecognized journeys. They preserve the
+    # vehicle's route across cameras without pretending we know its plate.
+    next_unidentified_journey = -1
     # Independent FIFO queues for each directed camera-to-camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     arrived_fifo: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
@@ -234,7 +237,7 @@ def main() -> None:
         if gallery is not None:
             feature_closed[camera_id] += 1
             feature_count = len(gallery.get("original", [])) + len(gallery.get("flipped", []))
-            if journey_number is not None and camera_id in GALLERY_CAMERAS:
+            if journey_number is not None and journey_number > 0 and camera_id in GALLERY_CAMERAS:
                 runtime_reid.add_identity_gallery(int(journey_number), gallery)
                 if database is not None:
                     for mirrored, key_name in ((False, "original"), (True, "flipped")):
@@ -560,7 +563,17 @@ def main() -> None:
                     if command.type is CommandType.SEARCH_ON_CAMERA:
                         source_key = (command.source_camera, int(command.track_id))
                         journey_number = journey_by_track.pop(source_key, None)
-                        if command.source_camera == 2 and journey_number is not None:
+                        if journey_number is None:
+                            # Do not strand a visible vehicle just because Re-ID/OCR
+                            # has not identified it yet. Keep searching downstream.
+                            journey_number = next_unidentified_journey
+                            next_unidentified_journey -= 1
+                            print(
+                                f"[UNIDENTIFIED HANDOFF] camera={command.source_camera} "
+                                f"local_id={command.track_id} provisional_journey={journey_number} "
+                                f"next_camera={command.camera_id}"
+                            )
+                        if command.source_camera == 2 and journey_number > 0:
                             # Keep cameras 2/3 displayed until every registered vehicle
                             # has crossed camera 2's configured EXIT topology line.
                             scan_camera2_journeys.discard(int(journey_number))
@@ -583,14 +596,14 @@ def main() -> None:
                         finish_gallery(command.source_camera, command.track_id, journey_number)
                         # Camera 1 has no topology transitions. Every actual network handoff
                         # (cameras 2-9) must pass topology eligibility AND Re-ID.
-                        if command.source_camera not in GALLERY_CAMERAS:
+                        if journey_number > 0 and command.source_camera not in GALLERY_CAMERAS:
                             runtime_reid.extend_identity(
                                 journey_number, command.source_camera, command.track_id
                             )
                         pending_reid[pair].append(
                             (journey_number, frame_ids.get(command.camera_id, 0))
                         )
-                        if database is not None:
+                        if database is not None and journey_number > 0:
                             database.record_event(
                                 command.source_camera, command.track_id, command.frame_id,
                                 "topology_exit", global_id=journey_number,
@@ -601,7 +614,7 @@ def main() -> None:
                         runtime_reid.forget_track(command.source_camera, command.track_id)
 
                         # Registration is considered complete exactly at camera-2 EXIT.
-                        if command.source_camera == 2:
+                        if command.source_camera == 2 and journey_number > 0:
                             completed = sessions.finish_on_camera2_track_lost(command.track_id)
                             if completed:
                                 registration_completed = True
@@ -685,7 +698,7 @@ def main() -> None:
                         if key in journey_by_track:
                             continue
                         journey_by_track[key] = int(journey_id)
-                        if database is not None and target_camera not in GALLERY_CAMERAS:
+                        if database is not None and journey_id > 0 and target_camera not in GALLERY_CAMERAS:
                             for vector in runtime_reid.track_features.get(key, []):
                                 database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
                         session_id = session_by_journey.get(journey_id)
@@ -696,7 +709,7 @@ def main() -> None:
                                     sessions.bind_track(session_id, target_camera, candidate_id)
                                 except (KeyError, ValueError) as exc:
                                     print(f"[SESSION BIND WARNING] {exc}")
-                        if database is not None:
+                        if database is not None and journey_id > 0:
                             database.record_event(
                                 target_camera, candidate_id, frame_id, "fifo_handoff",
                                 global_id=journey_id, source_camera_id=source_camera,
@@ -704,18 +717,20 @@ def main() -> None:
                                 movement_state="moving" if movement_state.get(key, False) else "stationary",
                                 details={"arrival_frame": int(arrival_frame), "match_method": "fifo"},
                             )
-                        reid_matches.append({
-                            "journey_id": int(journey_id),
+                        if journey_id > 0:
+                            reid_matches.append({
+                                "journey_id": int(journey_id),
                             "source_camera": int(source_camera),
                             "target_camera": int(target_camera),
                             "target_track_id": int(candidate_id),
                             "cosine_similarity": None,
-                            "match_method": "fifo",
-                        })
+                                "match_method": "fifo",
+                            })
                         print(
                             f"[BARRIER FIFO MATCH] journey={journey_id} "
                             f"{source_camera}->{target_camera} track={candidate_id} "
                             f"arrival_frame={arrival_frame}"
+                            + (" status=identified" if journey_id > 0 else " status=unidentified_continuing")
                         )
                     if not pending_items:
                         pending_reid.pop((source_camera, target_camera), None)
