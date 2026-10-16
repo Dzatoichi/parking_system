@@ -119,8 +119,12 @@ class RuntimeReID:
                 self._last_match_log_state[log_key] = state
             return None
 
-        best_score, mean_topk_score = self._similarity_scores(track_features, gallery)
-        # The decision uses the single best embedding pair, as requested.
+        # Evaluate the newest accepted observation only against every registered
+        # gallery embedding. Do not let an old target-frame embedding keep the
+        # displayed score artificially unchanged as the vehicle changes view.
+        query_feature = track_features[-1:]
+        best_score, mean_topk_score = self._similarity_scores(query_feature, gallery)
+        # Brute-force gallery search: the best single pair determines the decision.
         score = best_score
         self.last_scores[(camera_id, track_id)] = (journey_id, score)
         result = "ACCEPT" if score >= self.threshold else "REJECT"
