@@ -772,6 +772,52 @@ def main() -> None:
                         if frame_id - item[1] <= ttl
                         and (target_camera, item[0]) not in journey_by_track
                     ]
+                    # Camera 3 remains FIFO for now, as requested. Topology ENTER
+                    # events define the eligible target tracks; queue order decides identity.
+                    if target_camera == 3:
+                        max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
+                        arrival_items.sort(key=lambda item: (item[1], item[0]))
+                        while pending_items and arrival_items:
+                            journey_id, created_target_frame = pending_items[0]
+                            eligible_index = next((
+                                i for i, (_candidate_id, arrival_frame) in enumerate(arrival_items)
+                                if arrival_frame >= created_target_frame - max_early_frames
+                            ), None)
+                            if eligible_index is None:
+                                break
+                            candidate_id, arrival_frame = arrival_items.pop(eligible_index)
+                            pending_items.pop(0)
+                            key = (target_camera, int(candidate_id))
+                            if key in journey_by_track:
+                                continue
+                            journey_by_track[key] = journey_id
+                            session_id = session_by_journey.get(journey_id)
+                            if session_id:
+                                current = sessions.get_session(session_id)
+                                if current and current["status"] == "active":
+                                    try:
+                                        sessions.bind_track(session_id, target_camera, candidate_id)
+                                    except (KeyError, ValueError) as exc:
+                                        print(f"[SESSION BIND WARNING] {exc}")
+                            if database is not None and journey_id > 0:
+                                database.record_event(
+                                    target_camera, candidate_id, frame_id, "fifo_handoff",
+                                    global_id=journey_id, source_camera_id=source_camera,
+                                    target_camera_id=target_camera,
+                                    movement_state="moving" if movement_state.get(key, False) else "stationary",
+                                    details={
+                                        "arrival_frame": arrival_frame,
+                                        "match_method": "topology+fifo",
+                                    },
+                                )
+                            print(
+                                f"[FIFO HANDOFF MATCH] journey={journey_id} "
+                                f"{source_camera}->{target_camera} track={candidate_id} "
+                                f"arrival_frame={arrival_frame}"
+                            )
+                        if not pending_items:
+                            pending_reid.pop((source_camera, target_camera), None)
+                        continue
                     # Candidate generation is spatial/topological: a candidate must
                     # have crossed the ENTER line from this exact source camera and be
                     # inside the TTL window. Identity is decided by Re-ID, never queue order.
