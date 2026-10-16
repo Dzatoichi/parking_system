@@ -594,8 +594,8 @@ def main() -> None:
                                 f"journey={journey_number}"
                             )
                         finish_gallery(command.source_camera, command.track_id, journey_number)
-                        # Camera 1 has no topology transitions. Every actual network handoff
-                        # (cameras 2-9) must pass topology eligibility AND Re-ID.
+                        # Camera 1 has no topology transitions. Topology EXIT advances the search;
+                        # Re-ID is diagnostic and must never block the next-camera handoff.
                         if journey_number > 0 and command.source_camera not in GALLERY_CAMERAS:
                             runtime_reid.extend_identity(
                                 journey_number, command.source_camera, command.track_id
