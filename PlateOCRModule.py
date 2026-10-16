@@ -101,8 +101,11 @@ class PlateOCRTracker:
             if crop is not None:
                 vehicle_crops.append(crop)
                 track_ids.append(int(track_id))
+            else:
+                print(f"[OCR PIPELINE] track={int(track_id)} stage=vehicle_crop result=SKIP reason=invalid_or_empty_crop")
 
         if not vehicle_crops:
+            print("[OCR PIPELINE] stage=vehicle_crop result=EMPTY reason=no_valid_vehicle_crops")
             return {}
 
         yolo_results = self.plate_model.predict(
@@ -121,6 +124,10 @@ class PlateOCRTracker:
             track_ids, vehicle_crops, yolo_results
         ):
             if result.boxes is None or len(result.boxes) == 0:
+                print(
+                    f"[OCR PIPELINE] track={track_id} stage=plate_detection "
+                    f"result=MISS threshold={self.plate_conf:.3f}"
+                )
                 continue
 
             boxes = result.boxes.xyxy.detach().cpu().numpy()
@@ -135,10 +142,18 @@ class PlateOCRTracker:
             )
 
             if x2 <= x1 or y2 <= y1:
+                print(
+                    f"[OCR PIPELINE] track={track_id} stage=plate_crop "
+                    "result=SKIP reason=invalid_plate_box"
+                )
                 continue
 
             plate = vehicle_crop[y1:y2, x1:x2]
             if plate.size == 0:
+                print(
+                    f"[OCR PIPELINE] track={track_id} stage=plate_crop "
+                    "result=SKIP reason=empty_plate_crop"
+                )
                 continue
 
             rgb = cv2.cvtColor(plate, cv2.COLOR_BGR2RGB)
@@ -146,14 +161,22 @@ class PlateOCRTracker:
             plate_meta.append((track_id, float(confs[best_idx])))
 
         if not plate_images:
+            print("[OCR PIPELINE] stage=plate_detection result=NO_CROPS reason=no_valid_plate_boxes")
             return {}
 
         predictions = self.ocr.recognize_images(plate_images)
         readings: Dict[int, PlateReading] = {}
 
         for (track_id, plate_conf), pred in zip(plate_meta, predictions):
-            text = normalize_plate_text(str(pred.get("text", "")).strip())
+            raw_text = str(pred.get("text", "")).strip()
+            text = normalize_plate_text(raw_text)
             if not text:
+                print(
+                    f"[OCR PIPELINE] track={track_id} stage=character_recognition "
+                    f"result=EMPTY raw_text={raw_text!r} "
+                    f"char_conf={float(pred.get('char_confidence', 0.0)):.3f} "
+                    f"plate_conf={plate_conf:.3f}"
+                )
                 continue
 
             readings[track_id] = PlateReading(
