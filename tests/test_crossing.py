@@ -120,10 +120,11 @@ def test_bbox_edge_jitter_without_center_crossing_does_not_trigger():
     assert events == []
 
 
-def test_track_that_appears_on_the_line_gets_direction_after_moving():
+def test_track_crossing_exact_line_sample_gets_direction_after_moving():
     det = detector()
-    # сразу в кадре на линии, едет вверх
-    events = drive(det, 7, vertical_path(640, 400, 250, step=10))
+    # With the configured 15 px minimum, use a 20 px synthetic step. The center
+    # lands exactly on y=360 for one frame; the next frame must still confirm ENTER.
+    events = drive(det, 7, vertical_path(640, 400, 240, step=20))
 
     assert [e.role for e in events] == [Role.ENTER]
 
