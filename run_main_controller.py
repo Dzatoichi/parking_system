@@ -826,10 +826,6 @@ def main() -> None:
                         if frame_id - item[1] <= ttl
                         and (target_camera, item[0]) not in journey_by_track
                     ]
-                    for candidate_id, _arrival_frame in arrival_items:
-                        reid_candidate_status.setdefault(
-                            (target_camera, int(candidate_id)), "WAITING"
-                        )
                     # Camera 3 remains FIFO for now, as requested. Topology ENTER
                     # events define the eligible target tracks; queue order decides identity.
                     if target_camera == 3:
@@ -909,9 +905,10 @@ def main() -> None:
                                 continue
                             track_features = runtime_reid.track_features.get(key, [])
                             if len(track_features) < runtime_reid.min_samples:
-                                reid_candidate_status.setdefault(
-                                    key, f"WAIT FEATURES {len(track_features)}/{runtime_reid.min_samples}"
-                                )
+                                if reid_candidate_status.get(key) != "SCORED":
+                                    reid_candidate_status[key] = (
+                                        f"WAIT FEATURES {len(track_features)}/{runtime_reid.min_samples}"
+                                    )
                                 continue
                             # Keep the diagnostic log, but rank every viable pair by its
                             # raw appearance score, including scores below the acceptance
