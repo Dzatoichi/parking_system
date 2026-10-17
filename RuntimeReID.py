@@ -113,9 +113,9 @@ class RuntimeReID:
     ) -> None:
         """Log one new local-track vector against every registered identity gallery.
 
-        For each identity, best_sim is the maximum cosine similarity between this
-        single query vector and all vectors stored in that identity's gallery.
-        This is diagnostic only; it does not assign or change the vehicle identity.
+        For each identity, best_sim is the maximum cosine similarity across all
+        accepted embeddings for this local track and all vectors stored in that
+        identity's gallery. This is diagnostic only; it does not assign identity.
         """
         query = self._valid(query_feature)
         if query is None:
@@ -124,7 +124,8 @@ class RuntimeReID:
         for journey_id, gallery in self.identity_gallery.items():
             if not gallery:
                 continue
-            best_sim = self._best_similarity([query], gallery)
+            track_gallery = self.track_features.get(key, [query])
+            best_sim = self._best_similarity(track_gallery, gallery)
             plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
@@ -181,11 +182,10 @@ class RuntimeReID:
                 self._last_match_log_state[log_key] = state
             return None
 
-        # Evaluate the newest accepted observation only against every registered
-        # gallery embedding. Do not let an old target-frame embedding keep the
-        # displayed score artificially unchanged as the vehicle changes view.
-        query_feature = track_features[-1:]
-        score = self._best_similarity(query_feature, gallery)
+        # Best similarity means the strongest pair across every accepted sample
+        # of this current track and every sample in the journey gallery. No top-k
+        # averaging: a strong matching view must not be diluted by other viewpoints.
+        score = self._best_similarity(track_features, gallery)
         self.last_scores[(camera_id, track_id)] = (journey_id, score)
         result = "ACCEPT" if score >= self.threshold else "REJECT"
         # Feature counts change only when a new appearance sample is accepted, so

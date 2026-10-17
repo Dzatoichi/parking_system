@@ -51,6 +51,22 @@ class RuntimeReIDTests(unittest.TestCase):
         self.assertAlmostEqual(self.reid.match_track_to_journey(4, 12, 7), 1.0)
         self.assertAlmostEqual(self.reid.last_scores[(4, 12)][1], 1.0, places=5)
 
+    def test_best_similarity_uses_all_target_track_samples_not_only_latest(self):
+        # Latest target sample is dissimilar, but an earlier accepted sample
+        # strongly matches the source-camera journey gallery.
+        self.reid.add_identity_gallery(7, {
+            "original": [np.array([1.0, 0.0]), np.array([0.99, 0.01])]
+        })
+        self.reid.track_features[(4, 12)] = [
+            np.array([1.0, 0.0]),
+            np.array([0.0, 1.0]),
+        ]
+
+        score = self.reid.match_track_to_journey(4, 12, 7)
+
+        self.assertAlmostEqual(score, 1.0)
+        self.assertAlmostEqual(self.reid.last_scores[(4, 12)][1], 1.0, places=5)
+
     def test_diagnostic_matches_expire_after_their_frame_age(self):
         self.reid.add_identity_gallery(7, {"original": [np.array([1.0, 0.0])]})
         self.reid.log_feature_against_all_identities(
