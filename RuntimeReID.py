@@ -26,6 +26,7 @@ class RuntimeReID:
         self.last_sample_frame: dict[tuple[int, int], int] = {}
         self.last_scores: dict[tuple[int, int], tuple[int, float]] = {}
         self.last_diagnostic_scores: dict[tuple[int, int], float] = {}
+        self.last_diagnostic_matches: dict[tuple[int, int], tuple[float, int, str]] = {}
         # Avoid printing the same comparison on every video frame.
         self._last_match_log_state: dict[tuple[int, int, int], tuple] = {}
 
@@ -123,7 +124,12 @@ class RuntimeReID:
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
         if comparisons:
-            self.last_diagnostic_scores[(int(camera_id), int(track_id))] = float(comparisons[0][0])
+            best_sim, best_journey_id, best_plate, _gallery_count = comparisons[0]
+            key = (int(camera_id), int(track_id))
+            self.last_diagnostic_scores[key] = float(best_sim)
+            self.last_diagnostic_matches[key] = (
+                float(best_sim), int(best_journey_id), str(best_plate)
+            )
 
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
         camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
@@ -175,3 +181,4 @@ class RuntimeReID:
         self.last_sample_frame.pop(key, None)
         self.last_scores.pop(key, None)
         self.last_diagnostic_scores.pop(key, None)
+        self.last_diagnostic_matches.pop(key, None)
