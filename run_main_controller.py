@@ -463,7 +463,8 @@ def main() -> None:
                     }
                     for sampled_track_id, vector in sampled_embeddings:
                         runtime_reid.log_feature_against_all_identities(
-                            camera_id, int(sampled_track_id), vector, identity_labels
+                            camera_id, int(sampled_track_id), vector, identity_labels,
+                            frame_id=frame_id,
                         )
 
                 # Use the current registration-zone logic from run_feature_capture:
@@ -916,18 +917,21 @@ def main() -> None:
                             runtime_reid.match_track_to_journey(
                                 target_camera, int(candidate_id), int(journey_id)
                             )
-                            raw_score, _mean_topk = RuntimeReID._similarity_scores(
+                            best_pair_score, mean_topk_score = RuntimeReID._similarity_scores(
                                 track_features[-1:], identity_features
                             )
-                            if raw_score >= 0.0:
+                            decision_score = RuntimeReID._aggregate_similarity_score(
+                                best_pair_score, mean_topk_score
+                            )
+                            if best_pair_score >= 0.0:
                                 scored_pairs.append((
-                                    float(raw_score), int(journey_id), int(candidate_id),
+                                    float(decision_score), int(journey_id), int(candidate_id),
                                     int(arrival_frame), pending_index, arrival_index
                                 ))
                                 reid_candidate_status[key] = "SCORED"
                                 plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 reid_candidate_scores[(target_camera, int(candidate_id))].append(
-                                    (float(raw_score), int(journey_id), plate)
+                                    (float(decision_score), int(journey_id), plate)
                                 )
 
                     scored_pairs.sort(key=lambda item: item[0], reverse=True)
@@ -999,7 +1003,9 @@ def main() -> None:
                             quiet_log(
                                 f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                                 f"best_journey={best[1]} best_track={best[2]} "
-                                f"best_score={best[0]:.3f} threshold={runtime_reid.threshold:.3f} "
+                                f"decision_score={best[0]:.3f} "
+                                f"aggregation={Config.MATCH_SIM_AGGREGATION} "
+                                f"threshold={runtime_reid.threshold:.3f} "
                                 f"second_score={second_score:.3f} required_margin={min_margin:.3f} "
                                 f"reason={reason}; keep searching"
                             )
@@ -1088,7 +1094,10 @@ def main() -> None:
                         camera_id in FEATURE_CAMERAS
                         and feature_managers[camera_id].is_in_zone(camera_id, box)
                     )
-                    diagnostic_match = runtime_reid.last_diagnostic_matches.get(key)
+                    diagnostic_match = runtime_reid.get_fresh_diagnostic_match(
+                        camera_id, track_id, frame_id,
+                        max_age_frames=max(1, runtime_reid.sample_every),
+                    )
                     candidate_scores = sorted(
                         reid_candidate_scores.get(key, []),
                         key=lambda item: item[0],
