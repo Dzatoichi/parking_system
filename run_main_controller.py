@@ -1008,9 +1008,9 @@ def main() -> None:
                     )
                     diagnostic_match = runtime_reid.last_diagnostic_matches.get(key)
                     if diagnostic_match is not None:
-                        reid_conf, best_journey_id, best_plate = diagnostic_match
+                        reid_conf, best_journey_id, compared_plate = diagnostic_match
                         compared_vehicle = (
-                            best_plate if best_plate and best_plate != "UNKNOWN"
+                            compared_plate if compared_plate and compared_plate != "UNKNOWN"
                             else f"J{best_journey_id}"
                         )
                         reid_label = f"REID {reid_conf:.2f} vs {compared_vehicle}"
