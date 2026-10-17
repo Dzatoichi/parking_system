@@ -409,8 +409,23 @@ def main() -> None:
                             item for item in moving_tracks
                             if (2, int(item[0])) not in camera2_feature_closed_tracks
                         ]
+                    # Sample appearance for moving tracks plus every already-bound
+                    # journey and every topology-arrived candidate awaiting a handoff.
+                    # With continuous frame processing, per-frame displacement is smaller;
+                    # movement-only sampling can otherwise starve Re-ID of features.
+                    reid_track_ids = {int(tid) for tid, _bbox in moving_tracks}
+                    reid_track_ids.update(
+                        int(tid) for cam, tid in journey_by_track if cam == camera_id
+                    )
+                    for (source_cam, target_cam), candidates in arrived_candidates.items():
+                        if target_cam == camera_id and pending_reid.get((source_cam, target_cam)):
+                            reid_track_ids.update(int(tid) for tid, _arrival_frame in candidates)
+                    reid_tracks = [
+                        (int(tid), bbox) for tid, bbox in tracks
+                        if int(tid) in reid_track_ids
+                    ]
                     sampled_embeddings = runtime_reid.update_camera(
-                        camera_id, frame_id, frame, moving_tracks
+                        camera_id, frame_id, frame, reid_tracks
                     )
                     # Keep the visible BEST SIM diagnostic independent of whether
                     # a topology handoff is currently pending. Refresh it whenever a
