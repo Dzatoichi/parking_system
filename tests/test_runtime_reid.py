@@ -16,12 +16,10 @@ class RuntimeReIDTests(unittest.TestCase):
             DummyFeatureManager(), threshold=0.92, sample_every=1, min_samples=2
         )
 
-    def test_matches_only_after_minimum_tracklet_samples(self):
+    def test_current_frame_embedding_is_enough_for_a_threshold_match(self):
         self.reid.add_identity_gallery(7, {"original": [np.array([1.0, 0.0])]})
-        self.reid.track_features[(4, 12)] = [np.array([1.0, 0.0])]
-        self.assertIsNone(self.reid.match_track_to_journey(4, 12, 7))
-        self.reid.track_features[(4, 12)].append(np.array([0.99, 0.01]))
-        self.assertGreaterEqual(self.reid.match_track_to_journey(4, 12, 7), 0.92)
+        self.reid.last_query_features[(4, 12)] = np.array([1.0, 0.0])
+        self.assertAlmostEqual(self.reid.match_track_to_journey(4, 12, 7), 1.0)
 
     def test_rejects_dissimilar_appearance(self):
         self.reid.add_identity_gallery(7, {"original": [np.array([1.0, 0.0])]})
@@ -51,16 +49,12 @@ class RuntimeReIDTests(unittest.TestCase):
         self.assertAlmostEqual(self.reid.match_track_to_journey(4, 12, 7), 1.0)
         self.assertAlmostEqual(self.reid.last_scores[(4, 12)][1], 1.0, places=5)
 
-    def test_best_similarity_uses_all_target_track_samples_not_only_latest(self):
-        # Latest target sample is dissimilar, but an earlier accepted sample
-        # strongly matches the source-camera journey gallery.
+    def test_current_frame_compares_against_all_gallery_views(self):
+        # The current frame can match a non-first gallery view; no averaging is used.
         self.reid.add_identity_gallery(7, {
-            "original": [np.array([1.0, 0.0]), np.array([0.99, 0.01])]
+            "original": [np.array([0.0, 1.0]), np.array([1.0, 0.0])]
         })
-        self.reid.track_features[(4, 12)] = [
-            np.array([1.0, 0.0]),
-            np.array([0.0, 1.0]),
-        ]
+        self.reid.last_query_features[(4, 12)] = np.array([1.0, 0.0])
 
         score = self.reid.match_track_to_journey(4, 12, 7)
 
