@@ -89,133 +89,7 @@ def main() -> None:
                 "server and configure PARKING_DB_HOST, PARKING_DB_PORT, PARKING_DB_NAME, "
                 "PARKING_DB_USER and PARKING_DB_PASSWORD."
             ) from exc
-        print("[DATABASE] PostgreSQL connected; schema ready (JSONB embeddings, no pgvector).")
-    network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
-    print("[CONTROLLER] Camera network:", network.camera_ids)
-    for warning in network.warnings:
-        print("[TOPOLOGY WARNING]", warning)
-
-    # Reuse the existing registration components: feature galleries and OCR votes.
-    features = FeaturesManager(Config.OSNET_MODEL_PATH)
-    feature_managers = {
-        cid: FeatureZoneManager(features, str(ZONES_PATH))
-        for cid in FEATURE_CAMERAS
-    }
-    runtime_reid = RuntimeReID(
-        features,
-        threshold=Config.REID_SIMILARITY_THRESHOLD,
-        sample_every=max(1, int(getattr(Config, "RUNTIME_REID_EVERY_N_FRAMES", 2))),
-        min_samples=max(2, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 2))),
-    )
-    plate_ocr = PlateOCRTracker(
-        plate_model_path=Config.YOLO_PLATE_MODEL_PATH,
-        ocr_checkpoint_path=Config.OCR_MODEL_PATH,
-        plate_conf=Config.OCR_PLATE_CONF_THRESHOLD,
-        plate_iou=Config.OCR_PLATE_IOU_THRESHOLD,
-        plate_imgsz=Config.OCR_PLATE_IMGSZ,
-        ocr_device=Config.OCR_DEVICE,
-        ocr_batch_size=Config.OCR_BATCH_SIZE,
-        plate_device=INFERENCE_DEVICE,
-    )
-
-    sessions = EntrySessionManager()
-    transition_trackers = create_trackers(network)
-    captures: dict[int, cv2.VideoCapture] = {}
-    models: dict[int, YOLO] = {}
-    frame_ids: dict[int, int] = defaultdict(int)
-    camera_times: dict[int, float] = defaultdict(float)
-    ended: set[int] = set()
-    trigger_skip_frames = max(1, int(getattr(Config, "TRIGGER_SKIP_FRAMES", 3)))
-
-    # Labels describe a journey, not a camera-local BoT-SORT ID.
-    journey_by_track: dict[tuple[int, int], int] = {}
-    session_by_journey: dict[int, str] = {}
-    # Negative IDs are provisional, unrecognized journeys. They preserve the
-    # vehicle's route across cameras without pretending we know its plate.
-    next_unidentified_journey = -1
-    # Pending journeys and topology-arrived candidates, matched by ReID within each directed camera barrier.
-    pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    arrived_candidates: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    # Per-frame scores against every journey currently pending for this target camera.
-    reid_candidate_scores: dict[tuple[int, int], list[tuple[float, int, str]]] = defaultdict(list)
-    registered_tracks: set[tuple[int, int]] = set()
-    plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    feature_closed = Counter()
-    registration_completed = False
-    search_mode = False
-    scan_pending: list[tuple[int, str, int, str]] = []
-    scan_source_track_by_journey: dict[int, int] = {}
-    # Journeys already assigned to camera-2 tracks remain part of the scan display
-    # until their camera-2 topology EXIT line fires. Polygon membership is not an exit signal.
-    scan_camera2_journeys: set[int] = set()
-    last_centers: dict[tuple[int, int], tuple[float, float]] = {}
-    movement_scores: dict[tuple[int, int], float] = {}
-    movement_state: dict[tuple[int, int], bool] = {}
-    movement_last_seen: dict[tuple[int, int], int] = {}
-    track_last_seen: dict[tuple[int, int], int] = {}
-    camera2_interior_seen: set[tuple[int, int]] = set()
-    # First frame each camera-2 track enters a scan lane; use this for temporal
-    # gating, never as a substitute for ReID identity evidence.
-    scan_zone_first_seen: dict[tuple[int, int], int] = {}
-    camera2_feature_closed_tracks: set[tuple[int, int]] = set()
-    # Camera 1 remains the persistent scan/trigger view; the second tile follows
-    # the current downstream search destination. Cached tiles survive idle skips.
-    display_camera_id = 1
-    # Dynamic display pool: camera 1 is persistent, scan cameras are temporary,
-    # and the current route-search destination is added while its task is active.
-    visual_camera_pool: set[int] = {1}
-    last_tiles: dict[int, np.ndarray] = {}
-
-    def open_camera(camera_id: int, seek_seconds: float = 0.0) -> None:
-        """Open a stream only when a trigger/search task needs it.
-
-        Video files are assumed to share a recording timeline. Seek by timestamp,
-        not by copying another camera's frame index (FPS can differ).
-        """
-        if camera_id in captures or camera_id in ended:
-            return
-        try:
-            source = source_for(camera_id)
-        except ValueError as exc:
-            print(f"[STREAM ERROR] {exc}")
-            return
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            print(f"[STREAM ERROR] Cannot open camera {camera_id}: {source}")
-            cap.release()
-            ended.add(camera_id)
-            return
-        target_seconds = max(0.0, float(seek_seconds))
-        if target_seconds > 0:
-            cap.set(cv2.CAP_PROP_POS_MSEC, target_seconds * 1000.0)
-        captures[camera_id] = cap
-        models[camera_id] = YOLO(Config.YOLO_CAR_MODEL_PATH)
-        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
-        target_frame = max(0, int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0))
-        frame_ids[camera_id] = target_frame
-        camera_times[camera_id] = target_seconds
-        
-    def session_for_journey(journey_number: int) -> str | None:
-        session_id = session_by_journey.get(journey_number)
-        if not session_id:
-            return None
-        session = sessions.get_session(session_id)
-        return session_id if session and session["status"] == "active" else None
-
-    def start_registration(track_id: int, frame_id: int, current_tracks) -> None:
-        key = (1, int(track_id))
-        if key in registered_tracks:
-            return
-        entry_bbox = next((box for tid, box in current_tracks if int(tid) == int(track_id)), None)
-        entry_lane = feature_managers[1]._matching_profile(1, entry_bbox) if entry_bbox is not None else None
-        if entry_lane is None:
-                    }
-        print(
-            f"[SCAN] journey={journey_number if journey_number is not None else '-'} "
-            f"LOCAL {track_id} plate={plate} votes={sum(vote_summary.values())}"
-        )
-        plate_votes.pop((camera_id, int(track_id)), None)
+                plate_votes.pop((camera_id, int(track_id)), None)
 
     # Only camera 1 is open initially, acting as a lightweight trigger.
     # Scan cameras 2-3 and route cameras 4-9 are opened on demand.
@@ -228,11 +102,7 @@ def main() -> None:
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
-        print(
-            f"[CONTROLLER] Lazy mode: idle camera 1 skips {trigger_skip_frames - 1} "
-            "frames between trigger inferences; active journeys use every frame; cameras 2-9 open on demand. Q/Esc exits."
-        )
-
+        
         while captures:
             # If the focused route stream ended, return the display to the trigger
             # (or the next available stream) while continuing the controller loop.
@@ -261,12 +131,7 @@ def main() -> None:
                             # has not identified it yet. Keep searching downstream.
                             journey_number = next_unidentified_journey
                             next_unidentified_journey -= 1
-                            print(
-                                f"[UNIDENTIFIED HANDOFF] camera={command.source_camera} "
-                                f"local_id={command.track_id} provisional_journey={journey_number} "
-                                f"next_camera={command.camera_id}"
-                            )
-                        if command.source_camera == 2 and journey_number > 0:
+                                                    if command.source_camera == 2 and journey_number > 0:
                             # Keep cameras 2/3 displayed until every registered vehicle
                             # has crossed camera 2's configured EXIT topology line.
                             scan_camera2_journeys.discard(int(journey_number))
@@ -413,11 +278,9 @@ def main() -> None:
                                         "match_method": "topology+fifo",
                                     },
                                 )
-                            print(
-                                f"[FIFO HANDOFF MATCH] journey={journey_id} "
-                                f"{source_camera}->{target_camera} track={candidate_id} "
-                                f"arrival_frame={arrival_frame}"
-                            )
+                            match_plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
+                            match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
+                            print(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         if not pending_items:
                             pending_reid.pop((source_camera, target_camera), None)
                         continue
@@ -507,12 +370,9 @@ def main() -> None:
                                     "score_margin": round(best[0] - second_score, 4),
                                     "match_method": "topology+reid",
                                 })
-                                print(
-                                    f"[REID HANDOFF MATCH] journey={journey_id} "
-                                    f"{source_camera}->{target_camera} track={candidate_id} "
-                                    f"arrival_frame={arrival_frame} cosine={score:.3f} "
-                                    f"margin={best[0] - second_score:.3f}"
-                                )
+                                match_plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
+                                match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
+                                print(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         else:
                             reason = (
                                 "below_similarity_threshold"
@@ -723,11 +583,7 @@ def main() -> None:
                         for mirrored, key_name in ((False, "original"), (True, "flipped")):
                             for vector in gallery.get(key_name, []):
                                 database.save_embedding(global_id, cam, track_id, frame_ids.get(cam, 0), vector, mirrored)
-                print(
-                    f"[SHUTDOWN GALLERY] camera={cam} track={track_id} "
-                    f"samples={sample_count} global_id={global_id if global_id is not None else '-'}"
-                )
-        plate_summary = {
+                        plate_summary = {
             str(journey_id): {
                 "plate": best_plate(votes)[0],
                 "confidence": best_plate(votes)[1],
