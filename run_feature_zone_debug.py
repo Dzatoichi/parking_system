@@ -1,16 +1,16 @@
-"""PyCharm-friendly debugger for polygon-based Re-ID feature zones.
+"""PyCharm-friendly debugger for rectangle-based Re-ID feature zones.
 
 Run directly from PyCharm. No database connection or writes are performed.
 
 Mouse / keyboard:
-  e - toggle polygon edit mode; left-click adds polygon vertices
-  1 - select LEFT zone (cameras 1 and 2)
-  2 - select RIGHT zone (cameras 1 and 2)
-  d - select DEFAULT zone (camera 3 only)
-  s - save the current polygon
-  c - clear the current polygon
+  1 - highlight LEFT zone (cameras 1 and 2)
+  2 - highlight RIGHT zone (cameras 1 and 2)
+  d - highlight DEFAULT zone (camera 3 only)
   space - pause/resume video
   q / Esc - quit
+
+Edit rectangle corners manually in feature_zones.yaml using p1 and p2.
+This debugger is display-only and never writes zone configuration.
 
 Coordinates use the resized 1280x720 frame.
 """
@@ -97,9 +97,7 @@ class Debugger:
         })
         self.zones_cfg.setdefault("cameras", {})
         self.profile = ENTRY_GATE.upper() if CAMERA_ID in (1, 2) else "DEFAULT"
-        self.edit_polygon = False
         self.paused = False
-        self.pending_points: list[list[int]] = []
         self.last_frame: np.ndarray | None = None
         self.frame_id = 0
         self.last_seen: dict[int, int] = {}
@@ -120,15 +118,21 @@ class Debugger:
 
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
-        cv2.setMouseCallback(WINDOW_NAME, self.on_mouse)
 
-    def profile_points(self) -> list:
+    def camera_zones(self) -> dict:
         if CAMERA_ID not in (1, 2, 3):
-            return []
-        cam = self.zones_cfg["cameras"].get(CAMERA_ID,
-              self.zones_cfg["cameras"].get(str(CAMERA_ID), {})) or {}
-        return cam.get(self.profile, []) or []
+            return {}
+        return (self.zones_cfg.get("cameras", {}).get(
+            str(CAMERA_ID), self.zones_cfg.get("cameras", {}).get(CAMERA_ID, {})
+        ) or {})
 
+    @staticmethod
+    def rectangle_corners(zone_cfg):
+        if not isinstance(zone_cfg, dict) or "p1" not in zone_cfg or "p2" not in zone_cfg:
+            return None
+        x1, y1 = map(int, zone_cfg["p1"])
+        x2, y2 = map(int, zone_cfg["p2"])
+        return (min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))
     def set_profile(self, profile: str):
         if CAMERA_ID in (1, 2) and profile not in ("LEFT", "RIGHT"):
             print("Для камер 1/2 выберите профиль LEFT или RIGHT.")
@@ -143,48 +147,6 @@ class Debugger:
         self.pending_points.clear()
         print(f"Активный профиль зоны: camera={CAMERA_ID}, profile={self.profile}")
 
-    def on_mouse(self, event, x, y, flags, param):
-        if event != cv2.EVENT_LBUTTONDOWN:
-            return
-        if self.edit_polygon:
-            self.pending_points.append([int(x), int(y)])
-            return
- 
-    def save_config(self):
-        if CAMERA_ID not in (1, 2, 3):
-            print("Камеры 4-9 не имеют зон сбора признаков; сохранять нечего.")
-            return
-        cameras_cfg = self.zones_cfg.setdefault("cameras", {})
-        cam_key = str(CAMERA_ID)
-        # YAML may parse unquoted camera IDs as integers. Normalize this key before saving,
-        # otherwise both 1 and "1" could coexist and the old polygon might win on reload.
-        integer_entry = cameras_cfg.pop(CAMERA_ID, {}) if CAMERA_ID in cameras_cfg else {}
-        string_entry = cameras_cfg.get(cam_key, {}) or {}
-        merged_entry = dict(integer_entry or {})
-        merged_entry.update(string_entry)
-        cameras_cfg[cam_key] = merged_entry
-        self.zones_cfg["cameras"][cam_key][self.profile] = self.pending_points.copy() \
-            if self.edit_polygon and self.pending_points else self.profile_points()
-        # If not actively drawing, preserve the last stored polygon.
-        if self.edit_polygon:
-            self.zones_cfg["cameras"][cam_key][self.profile] = self.pending_points.copy()
-        with ZONES_PATH.open("w", encoding="utf-8") as stream:
-            yaml.safe_dump(self.zones_cfg, stream, allow_unicode=True, sort_keys=False)
-        print(f"Saved zones: {ZONES_PATH}")
-        if RUN_OSNET_FEATURES:
-            self.zones = FeatureZoneManager(self.features, str(ZONES_PATH))
-
-    def clear_current(self):
-        if CAMERA_ID not in (1, 2, 3):
-            print("Камеры 4-9 не имеют зон сбора признаков.")
-            return
-        self.pending_points.clear()
-        cam = self.zones_cfg["cameras"].setdefault(str(CAMERA_ID), {})
-        cam[self.profile] = []
-        print(f"Cleared polygon: camera={CAMERA_ID}, profile={self.profile}")
-        if RUN_OSNET_FEATURES:
-            self.zones = FeatureZoneManager(self.features, str(ZONES_PATH))
-
     def draw_line(self, image, p1, p2, color, label, thickness=2):
         a, b = tuple(map(int, p1)), tuple(map(int, p2))
         cv2.line(image, a, b, color, thickness, cv2.LINE_AA)
@@ -195,29 +157,24 @@ class Debugger:
     def render(self, frame, tracks, boxes, ids, decisions, events):
         view = frame.copy()
 
-        # Show both zones on cameras 1/2; selected zone is highlighted.
-        camera_cfg = self.zones_cfg.get("cameras", {}).get(
-            str(CAMERA_ID), self.zones_cfg.get("cameras", {}).get(CAMERA_ID, {})
-        ) or {}
-        if not self.edit_polygon and CAMERA_ID in (1, 2):
-            for side, color in (("LEFT", (255, 120, 0)), ("RIGHT", (0, 150, 255))):
-                side_points = camera_cfg.get(side, []) or []
-                if len(side_points) >= 3:
-                    pts = np.asarray(side_points, dtype=np.int32).reshape((-1, 1, 2))
-                    cv2.polylines(view, [pts], True, color, 3 if side == self.profile else 1, cv2.LINE_AA)
-                    cv2.putText(view, side, tuple(side_points[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-        points = self.pending_points if self.edit_polygon else self.profile_points()
-        if len(points) >= 2:
-            pts = np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(view, [pts], self.edit_polygon and len(points) >= 3,
-                          (0, 255, 255), 2, cv2.LINE_AA)
-            for i, point in enumerate(points):
-                cv2.circle(view, tuple(point), 5, (0, 255, 255), -1)
-                cv2.putText(view, str(i + 1), (point[0] + 5, point[1] - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
-        elif not self.edit_polygon:
+        # Draw configured rectangular zones; coordinates are read from YAML only.
+        camera_cfg = self.camera_zones()
+        zone_names = ("LEFT", "RIGHT") if CAMERA_ID in (1, 2) else ("DEFAULT",)
+        colors = {"LEFT": (255, 120, 0), "RIGHT": (0, 150, 255), "DEFAULT": (0, 255, 255)}
+        for name in zone_names:
+            corners = self.rectangle_corners(camera_cfg.get(name))
+            if corners is None:
+                continue
+            p1, p2 = corners
+            thickness = 3 if name == self.profile else 1
+            color = colors[name]
+            cv2.rectangle(view, p1, p2, color, thickness, cv2.LINE_AA)
+            cv2.putText(view, name, (p1[0], max(20, p1[1] - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+
+        if not any(self.rectangle_corners(camera_cfg.get(name)) for name in zone_names):
             message = ("FEATURE CAPTURE DISABLED: cameras 4-9" if CAMERA_ID not in (1, 2, 3)
-                       else "ZONE NOT CONFIGURED - press E and click polygon vertices")
+                       else "RECTANGLE NOT CONFIGURED - edit feature_zones.yaml")
             cv2.putText(view, message, (18, 95),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
 
@@ -246,13 +203,13 @@ class Debugger:
                         (18, 125 + 24 * (self.transitions.total() % 4)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 0, 255), 2)
 
-        active_mode = "POLYGON EDIT" if self.edit_polygon else "VIEW / FEATURE TEST"
+        active_mode = "RECTANGLE VIEW / FEATURE TEST"
         gate_text = f"selected zone={self.profile}" if CAMERA_ID in (1, 2) else ("single DEFAULT zone" if CAMERA_ID == 3 else "FEATURE CAPTURE DISABLED: cameras 4-9")
         lines = [
             f"Camera {CAMERA_ID} | profile={self.profile} | frame={self.frame_id} | {active_mode}",
             gate_text,
             f"Accepted={sum(self.accepted.values())} rejected_similar={sum(self.rejected.values())}",
-            "E edit polygon | 1 LEFT | 2 RIGHT | D DEFAULT (cam3) | S save | C clear | SPACE pause | Q quit",
+            "Edit feature_zones.yaml: p1/p2 corners | 1 LEFT | 2 RIGHT | D DEFAULT | SPACE pause | Q quit",
         ]
         for i, text in enumerate(lines):
             cv2.putText(view, text, (12, 25 + i * 23), cv2.FONT_HERSHEY_SIMPLEX,
@@ -266,8 +223,8 @@ class Debugger:
             raise RuntimeError(f"Cannot open video source: {source}")
         self.log.info("START camera=%d video=%s initial_zone_profile=%s db_writes=0",
                       CAMERA_ID, source, self.profile)
-        print("Debugger started. Use E to edit the selected zone polygon; press Q to quit.")
-        print("Capture uses polygons and camera-specific bbox anchor points.")
+        print("Debugger started. Rectangles are read-only; edit p1/p2 in feature_zones.yaml. Press Q to quit.")
+        print("Capture uses rectangular zones and camera-specific bbox anchor points.")
         try:
             while True:
                 if not self.paused:
@@ -336,23 +293,14 @@ class Debugger:
                     break
                 elif key == ord(" "):
                     self.paused = not self.paused
-                elif key == ord("e"):
-                    if CAMERA_ID not in (1, 2, 3):
-                        print("Камеры 4-9 не имеют зон сбора признаков.")
-                    else:
-                        self.edit_polygon = not self.edit_polygon
-                        self.pending_points = self.profile_points().copy() if self.edit_polygon else []
-                        print(f"Polygon edit: {self.edit_polygon}. Click vertices in order; press S to save.")
+
                 elif key == ord("1"):
                     self.set_profile("LEFT")
                 elif key == ord("2"):
                     self.set_profile("RIGHT")
                 elif key == ord("d") and CAMERA_ID == 3:
                     self.set_profile("DEFAULT")
-                elif key == ord("s"):
-                    self.save_config()
-                elif key == ord("c"):
-                    self.clear_current()
+
         finally:
             cap.release()
             cv2.destroyAllWindows()
