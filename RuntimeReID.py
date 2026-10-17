@@ -25,6 +25,7 @@ class RuntimeReID:
         self.track_features: dict[tuple[int, int], list[np.ndarray]] = defaultdict(list)
         self.last_sample_frame: dict[tuple[int, int], int] = {}
         self.last_scores: dict[tuple[int, int], tuple[int, float]] = {}
+        self.last_diagnostic_scores: dict[tuple[int, int], float] = {}
         # Avoid printing the same comparison on every video frame.
         self._last_match_log_state: dict[tuple[int, int, int], tuple] = {}
 
@@ -121,6 +122,8 @@ class RuntimeReID:
             plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
+        if comparisons:
+            self.last_diagnostic_scores[(int(camera_id), int(track_id))] = float(comparisons[0][0])
         for best_sim, journey_id, plate, gallery_count in comparisons:
             print(
                 f"[REID COMPARE] camera={int(camera_id)} local_id={int(track_id)} "
