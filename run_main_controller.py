@@ -1330,10 +1330,10 @@ def main() -> None:
                         label_parts.append(
                             f"MATCHED {plate}" if plate != "UNKNOWN" else f"MATCHED JOURNEY {global_id}"
                         )
-                    if not in_scan_zone and (
-                        candidate_scores or candidate_status or overlay_state is not None
-                        or diagnostic_match is not None
-                    ):
+                    # Always expose Re-ID state outside the entry camera. Hiding this
+                    # label merely because a bbox still overlaps a scan polygon made a
+                    # downstream track look as if Re-ID had never run.
+                    if camera_id != 1:
                         label_parts.append(reid_label)
                     draw_text_label(display, box, " | ".join(label_parts), color)
 
