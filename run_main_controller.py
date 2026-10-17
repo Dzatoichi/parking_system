@@ -109,7 +109,7 @@ def main() -> None:
     runtime_reid = RuntimeReID(
         features,
         threshold=Config.REID_SIMILARITY_THRESHOLD,
-        sample_every=max(1, int(getattr(Config, "RUNTIME_REID_EVERY_N_FRAMES", 2))),
+        sample_every=1
         min_samples=max(2, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 2))),
     )
     plate_ocr = PlateOCRTracker(
@@ -454,17 +454,33 @@ def main() -> None:
                     sampled_embeddings = runtime_reid.update_camera(
                         camera_id, frame_id, frame, reid_tracks
                     )
-                    # Keep the visible BEST SIM diagnostic independent of whether
-                    # a topology handoff is currently pending. Refresh it whenever a
-                    # new Re-ID appearance sample is accepted for this local track.
+                    # Compare the current frame only against identities in search tasks
+                    # for this destination camera, and only for topology-arrived tracks.
+                    # This is independent of whether the current embedding was accepted
+                    # into the track's diversity-filtered history gallery.
                     identity_labels = {
                         int(journey_id): best_plate(votes)[0]
                         for journey_id, votes in journey_plate_votes.items()
                     }
-                    for sampled_track_id, vector in sampled_embeddings:
+                    active_task_journeys = {
+                        int(journey_id)
+                        for (_source_camera, target_camera), items in pending_reid.items()
+                        if target_camera == camera_id
+                        for journey_id, _created_frame in items
+                    }
+                    eligible_track_ids = {
+                        int(track_id)
+                        for (_source_camera, target_camera), candidates in arrived_candidates.items()
+                        if target_camera == camera_id and pending_reid.get((_source_camera, target_camera))
+                        for track_id, _arrival_frame in candidates
+                    }
+                    for candidate_track_id in sorted(eligible_track_ids):
+                        query = runtime_reid.last_query_features.get((camera_id, candidate_track_id))
+                        if query is None:
+                            continue
                         runtime_reid.log_feature_against_all_identities(
-                            camera_id, int(sampled_track_id), vector, identity_labels,
-                            frame_id=frame_id,
+                            camera_id, candidate_track_id, query, identity_labels,
+                            frame_id=frame_id, journey_ids=active_task_journeys,
                         )
 
                 # Use the current registration-zone logic from run_feature_capture:
@@ -758,8 +774,8 @@ def main() -> None:
                             else f"LOCAL {int(command.track_id)}"
                         )
                         print(
-                            f"[TRANSITION] {command.source_camera}->{command.camera_id} "
-                            f"{transition_label}"
+                            f"[TRANSITION] camera={command.source_camera} "
+                            f"{command.source_camera}->{command.camera_id} {transition_label}"
                         )
                         # Target stream is already active; never start/seek it on a handoff.
 
@@ -776,6 +792,10 @@ def main() -> None:
                             )
                         pair = (int(command.source_camera), int(command.camera_id))
                         arrived_candidates[pair].append((int(command.track_id), int(command.frame_id)))
+                        print(
+                            f"[TRANSITION] camera={command.camera_id} "
+                            f"{command.source_camera}->{command.camera_id}"
+                        )
                         quiet_log(
                             f"[BARRIER ARRIVAL] {pair[0]}->{pair[1]} "
                             f"track={command.track_id} position={len(arrived_candidates[pair])}"
@@ -904,20 +924,14 @@ def main() -> None:
                             key = (target_camera, int(candidate_id))
                             if key in journey_by_track:
                                 continue
-                            track_features = runtime_reid.track_features.get(key, [])
-                            if len(track_features) < runtime_reid.min_samples:
-                                if reid_candidate_status.get(key) != "SCORED":
-                                    reid_candidate_status[key] = (
-                                        f"WAIT FEATURES {len(track_features)}/{runtime_reid.min_samples}"
-                                    )
+                            # Compare this frame with every vector in the journey gallery.
+                            # Duplicate filtering controls storage only, not matching.
+                            query_feature = runtime_reid.last_query_features.get(key)
+                            if query_feature is None:
+                                reid_candidate_status[key] = "WAIT FRAME FEATURE"
                                 continue
-                            # Rank viable handoff pairs by their best cosine similarity,
-                            # including scores below threshold so a runner-up is visible.
-                            runtime_reid.match_track_to_journey(
-                                target_camera, int(candidate_id), int(journey_id)
-                            )
                             decision_score = RuntimeReID._best_similarity(
-                                track_features[-1:], identity_features
+                                [query_feature], identity_features
                             )
                             if decision_score >= 0.0:
                                 scored_pairs.append((
@@ -933,10 +947,10 @@ def main() -> None:
                     scored_pairs.sort(key=lambda item: item[0], reverse=True)
                     if scored_pairs:
                         best = scored_pairs[0]
-                        # Require both the configured similarity threshold and a margin
-                        # over every competing journey/track pairing.
+                        # The highest-scoring topology-eligible pair is identified as soon
+                        # as this frame's best similarity reaches the configured threshold.
                         second_score = scored_pairs[1][0] if len(scored_pairs) > 1 else -1.0
-                        if best[0] >= runtime_reid.threshold and best[0] - second_score >= min_margin:
+                        if best[0] >= runtime_reid.threshold:
                             score, journey_id, candidate_id, arrival_frame, pending_index, arrival_index = best
                             key = (target_camera, candidate_id)
                             if key not in journey_by_track:
@@ -967,7 +981,7 @@ def main() -> None:
                                         movement_state="moving" if movement_state.get(key, False) else "stationary",
                                         details={
                                             "arrival_frame": arrival_frame,
-                                            "match_method": "topology+reid",
+                                            "match_method": "topology+frame_best_similarity",
                                             "cosine_similarity": round(score, 4),
                                             "score_margin": round(best[0] - second_score, 4),
                                         },
@@ -979,7 +993,7 @@ def main() -> None:
                                     "target_track_id": candidate_id,
                                     "cosine_similarity": round(score, 4),
                                     "score_margin": round(best[0] - second_score, 4),
-                                    "match_method": "topology+reid",
+                                    "match_method": "topology+frame_best_similarity",
                                 })
                                 match_plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
@@ -992,9 +1006,9 @@ def main() -> None:
                                     f"WAIT SIM {best[0]:.2f}<{runtime_reid.threshold:.2f}"
                                 )
                             else:
-                                reason = "ambiguous_score_margin"
+                                reason = "below_similarity_threshold"
                                 reid_candidate_status[(target_camera, int(best[2]))] = (
-                                    f"AMBIGUOUS Δ{score_delta:.2f}<{min_margin:.2f}"
+                                    f"WAIT SIM {best[0]:.2f}<{runtime_reid.threshold:.2f}"
                                 )
                             quiet_log(
                                 f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
@@ -1112,7 +1126,7 @@ def main() -> None:
                             if candidate_status and candidate_status not in {"WAITING", "SCORED"}
                             else "PENDING"
                         )
-                        reid_label = f"HANDOFF SIM {best_score:.2f} {best_name} | {suffix}"
+                        reid_label = f"BEST SIM {best_score:.2f} {best_name} | {suffix}"
                     elif candidate_status and candidate_status not in {"WAITING", "SCORED"}:
                         reid_label = f"REID {candidate_status}"
                     elif diagnostic_match is not None:
