@@ -63,7 +63,7 @@ class RuntimeReID:
             x1, x2 = max(0, x1), min(w, x2)
             y1, y2 = max(0, y1), min(h, y2)
             if x2 - x1 < Config.FEATURE_MIN_CROP_SIZE or y2 - y1 < Config.FEATURE_MIN_CROP_SIZE:
-                print(
+                logger.debug(
                     f"[REID EMBEDDING] camera={camera_id} frame={frame_id} track={track_id} "
                     f"result=SKIP reason=crop_too_small crop={x2-x1}x{y2-y1} "
                     f"min_side={Config.FEATURE_MIN_CROP_SIZE}"
@@ -71,7 +71,7 @@ class RuntimeReID:
                 continue
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
-                print(
+                logger.debug(
                     f"[REID EMBEDDING] camera={camera_id} frame={frame_id} track={track_id} "
                     "result=SKIP reason=empty_crop"
                 )
@@ -85,7 +85,7 @@ class RuntimeReID:
             vectors = self.feature_manager.extract_features(images)
         except Exception as exc:
             logger.exception("Runtime Re-ID extraction failed on camera %s", camera_id)
-            print(
+            logger.debug(
                 f"[REID EMBEDDING ERROR] camera={camera_id} frame={frame_id} "
                 f"tracks={[key[1] for key in keys]} error={type(exc).__name__}: {exc}"
             )
@@ -97,7 +97,7 @@ class RuntimeReID:
         for key, vector in zip(keys, vectors):
             normalized = self._valid(vector)
             if normalized is None:
-                print(
+                logger.debug(
                     f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
                     "result=INVALID reason=zero_norm_or_non_finite"
                 )
@@ -108,7 +108,7 @@ class RuntimeReID:
             # Adaptive sampling filters stored history only; every valid current-frame
             # embedding remains available to the matching/overlay path.
             if duplicate_sim is not None and duplicate_sim >= duplicate_threshold:
-                print(
+                logger.debug(
                     f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
                     f"result=QUERY_READY_STORED_NO duplicate_sim={duplicate_sim:.3f} "
                     f"duplicate_threshold={duplicate_threshold:.3f} "
@@ -117,7 +117,7 @@ class RuntimeReID:
                 continue
             gallery.append(normalized)
             accepted.append((key[1], normalized.copy()))
-            print(
+            logger.debug(
                 f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
                 f"result=QUERY_READY_AND_STORED duplicate_sim="
                 f"{duplicate_sim:.3f}" if duplicate_sim is not None else
@@ -225,7 +225,7 @@ class RuntimeReID:
                 "INSUFFICIENT_FEATURES",
             )
             if self._last_match_log_state.get(log_key) != state:
-                print(
+                logger.debug(
                     f"[REID SIM] camera={camera_id} track={track_id} journey={journey_id} "
                     f"sim=NA query_available={query is not None} "
                     f"journey_features={len(gallery)} result=INSUFFICIENT_FEATURES"
