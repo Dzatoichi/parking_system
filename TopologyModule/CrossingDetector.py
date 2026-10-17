@@ -4,7 +4,7 @@ from typing import Iterable, Optional
 
 from Config import Config
 from TopologyModule.CameraNetwork import Camera
-from TopologyModule.TransitionLine import Role, TransitionLine
+from TopologyModule.TransitionLine import MIN_MOTION_ALIGNMENT, Role, TransitionLine
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,9 @@ class _CrossingState:
     fired: bool = False
     missed: int = 0
     far_frames: int = 0
+    # Retain the last center off the line so an exact-on-line sample does not
+    # hide the crossing on the next frame.
+    last_nonzero_center: tuple[float, float] | None = None
 
 
 def _center(bbox) -> tuple[float, float]:
@@ -116,51 +119,51 @@ class CrossingDetector:
         key = (track_id, line.line_id)
         state = self._states.setdefault(key, _CrossingState())
 
-        # После события ждём, пока центр автомобиля действительно отойдёт от
-        # линии на заданное расстояние. Это не условие самого перехода, а только
-        # защита от повторных событий из-за дрожания трека около линии.
-        current_distance = abs(line.signed_distance(center))
-        if state.fired:
-            if current_distance >= self.release_margin_px:
-                state.far_frames += 1
-                if state.far_frames >= self.release_frames:
-                    state.fired = False
-                    state.far_frames = 0
-            else:
-                state.far_frames = 0
-            return None
-
         motion = (center[0] - prev[0], center[1] - prev[1])
+        motion_length = (motion[0] ** 2 + motion[1] ** 2) ** 0.5
+        current_side = line.signed_distance(center)
+        previous_side = line.signed_distance(prev)
 
-        # Сначала проверяем геометрию текущего bbox. Важен сам факт того, что
-        # линия находится внутри bbox: для горизонтальной линии это означает,
-        # что верхняя и нижняя границы bbox оказались по разные стороны линии.
-        #
-        # Нельзя сначала требовать большой сдвиг центра или высокий alignment:
-        # при медленном движении центр может почти не измениться, хотя bbox уже
-        # физически пересёк линию. Именно это приводило к пропуску перехода.
-        if not line.bbox_crosses_between(prev_bbox, bbox, motion):
+        # This guard applies to every crossing route, including center crossings.
+        # A finite segment and perpendicular motion are mandatory; stationary
+        # tracks or motion along the line must not create transition events.
+        if motion_length < self.min_move_px or line.alignment(motion) < MIN_MOTION_ALIGNMENT:
+            if abs(current_side) > 1e-9:
+                state.last_nonzero_center = center
+            if state.fired:
+                self._update_release_state(state, abs(current_side))
             return None
 
-        # Направление всё равно обязательно. Берём именно компонент движения
-        # поперёк линии: так ENTER/EXIT определяется по фактическому движению,
-        # а движение вдоль линии не считается переходом.
-        nx, ny = line.normal
-        line_length = line.length
-        if line_length == 0:
+        # After an event, wait for a meaningful, sustained departure from the line
+        # before allowing another event for the same track and line.
+        if state.fired:
+            self._update_release_state(state, abs(current_side))
+            if abs(current_side) > 1e-9:
+                state.last_nonzero_center = center
             return None
 
-        normal_projection = (
-            motion[0] * nx + motion[1] * ny
-        ) / line_length
+        # Exact-on-line samples can occur due to pixel quantization. If the previous
+        # center was exactly on the line, compare with the last known center on a
+        # definite side; this catches the crossing without treating a mere touch
+        # followed by a return to the same side as a transition.
+        crossing_origin = prev
+        if abs(previous_side) <= 1e-9 and state.last_nonzero_center is not None:
+            crossing_origin = state.last_nonzero_center
+        center_crossed = line.center_crosses(crossing_origin, center)
 
-        # Нужен ненулевой знак движения через линию, но не большой по модулю
-        # сдвиг. Это позволяет корректно поймать медленный автомобиль.
-        if abs(normal_projection) < 1e-6:
+        # Center-crossing is the normal case. If an object jumps completely over the
+        # line between sampled frames, the bbox-side test is the fallback. Merely
+        # bringing one bbox edge to the line is not enough to transfer cameras.
+        bbox_jumped = line.bbox_crosses_between(prev_bbox, bbox, motion)
+        if not center_crossed and not bbox_jumped:
+            if abs(current_side) > 1e-9:
+                state.last_nonzero_center = center
             return None
 
         state.fired = True
         state.far_frames = 0
+        if abs(current_side) > 1e-9:
+            state.last_nonzero_center = center
 
         return TransitionEvent(
             camera_id=line.camera_id,
@@ -171,6 +174,15 @@ class CrossingDetector:
             frame_id=frame_id,
             motion=motion,
         )
+
+    def _update_release_state(self, state: _CrossingState, current_distance: float) -> None:
+        if current_distance >= self.release_margin_px:
+            state.far_frames += 1
+            if state.far_frames >= self.release_frames:
+                state.fired = False
+                state.far_frames = 0
+        else:
+            state.far_frames = 0
 
     def _release_missing(self, present: set) -> None:
         for (track_id, line_id), state in list(self._states.items()):

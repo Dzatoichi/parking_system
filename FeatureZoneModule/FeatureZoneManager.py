@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import yaml
 
+from Config import Config
+
 @dataclass
 class TrackGallery:
     """Embeddings for one local track observation."""
@@ -32,9 +34,11 @@ class FeatureZoneManager:
         self.features_manager = features_manager
         with open(config_path, "r", encoding="utf-8") as stream:
             self.config = yaml.safe_load(stream) or {}
-        threshold = self.config.get("similarity_threshold", 0.90) if similarity_threshold is None else similarity_threshold
-        interval = self.config.get("sample_every_n_frames", 3) if sample_every_n_frames is None else sample_every_n_frames
-        crop_size = self.config.get("min_crop_size", 8) if min_crop_size is None else min_crop_size
+        # Thresholds and sampling intervals are centralized in Config.py.
+        # feature_zones.yaml contains camera geometry only.
+        threshold = Config.GALLERY_DUPLICATE_SIM_THRESHOLD if similarity_threshold is None else similarity_threshold
+        interval = Config.GALLERY_SAMPLE_EVERY_N_FRAMES if sample_every_n_frames is None else sample_every_n_frames
+        crop_size = Config.FEATURE_MIN_CROP_SIZE if min_crop_size is None else min_crop_size
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("similarity_threshold must be between 0 and 1")
         if interval < 1:
@@ -43,30 +47,42 @@ class FeatureZoneManager:
             raise ValueError("min_crop_size must be >= 1")
         self.similarity_threshold, self.sample_every_n_frames, self.min_crop_size = float(threshold), int(interval), int(crop_size)
         self._galleries: dict[tuple[int, int], TrackGallery] = {}
+        # Tracks explicitly closed (e.g. camera-2 frame exit) cannot reactivate
+        # while the tracker still reports them. They become eligible again only
+        # after disappearing from the visible track set.
+        self._closed_tracks: set[tuple[int, int]] = set()
         # Latest comparison against the last accepted ORIGINAL embedding, per local track.
         # Kept between sampling frames so the UI can display it beneath the bbox.
         self.last_comparison_by_track: dict[int, dict[str, float]] = {}
-        self._polygons = self._parse_polygons(self.config.get("cameras", {}))
+        self._rectangles = self._parse_rectangles(self.config.get("cameras", {}))
 
     @staticmethod
-    def _parse_polygons(cameras: Mapping) -> dict[int, dict[str, np.ndarray]]:
-        parsed = {}
+    def _parse_rectangles(cameras: Mapping) -> dict[int, dict[str, tuple[int, int, int, int]]]:
+        """Parse rectangular zones from two opposite corners, p1 and p2."""
+        parsed: dict[int, dict[str, tuple[int, int, int, int]]] = {}
         for camera_key, camera_cfg in cameras.items():
             try:
                 camera_id = int(camera_key)
             except (TypeError, ValueError):
                 continue
             profiles = {}
-            for profile_name, points in (camera_cfg or {}).items():
-                if not points:
+            for profile_name, raw in (camera_cfg or {}).items():
+                if not raw:
                     continue
-                polygon = np.asarray(points, dtype=np.int32)
-                if polygon.ndim != 2 or polygon.shape[1] != 2 or len(polygon) < 3:
-                    raise ValueError(f"Camera {camera_id} profile {profile_name!r} needs >= 3 [x, y] points")
-                profiles[str(profile_name).upper()] = polygon
+                if not isinstance(raw, Mapping) or "p1" not in raw or "p2" not in raw:
+                    raise ValueError(f"Camera {camera_id} profile {profile_name!r} must define p1 and p2 rectangle corners")
+                p1, p2 = raw["p1"], raw["p2"]
+                if (not isinstance(p1, (list, tuple)) or len(p1) != 2 or not isinstance(p2, (list, tuple)) or len(p2) != 2):
+                    raise ValueError(f"Camera {camera_id} profile {profile_name!r}: p1/p2 must be [x, y]")
+                x1, y1 = int(p1[0]), int(p1[1])
+                x2, y2 = int(p2[0]), int(p2[1])
+                left, right = sorted((x1, x2))
+                top, bottom = sorted((y1, y2))
+                if left == right or top == bottom:
+                    raise ValueError(f"Camera {camera_id} profile {profile_name!r}: rectangle must have non-zero width and height")
+                profiles[str(profile_name).upper()] = (left, top, right, bottom)
             parsed[camera_id] = profiles
         return parsed
-
     @staticmethod
     def anchor(camera_id: int, bbox) -> tuple[float, float]:
         camera_id = int(camera_id)
@@ -79,19 +95,24 @@ class FeatureZoneManager:
             return (x1 + x2) / 2.0, y1
         return (x1 + x2) / 2.0, y2
 
-    @staticmethod
-    def _inside_polygon(point: tuple[float, float], polygon: np.ndarray) -> bool:
-        return cv2.pointPolygonTest(polygon, (float(point[0]), float(point[1])), False) >= 0
-
     def _matching_profile(self, camera_id: int, bbox) -> str | None:
-        profiles = self._polygons.get(int(camera_id), {})
+        profiles = self._rectangles.get(int(camera_id), {})
         candidates = ("LEFT", "RIGHT") if int(camera_id) in (1, 2) else ("DEFAULT",)
         point = self.anchor(camera_id, bbox)
-        # Deterministic priority if polygons overlap; ideally the two zones should not overlap.
+        # Deterministic priority if rectangles overlap; LEFT wins over RIGHT.
+        x, y = point
         for name in candidates:
-            if name in profiles and self._inside_polygon(point, profiles[name]):
-                return name
+            if name in profiles:
+                left, top, right, bottom = profiles[name]
+                if left <= x <= right and top <= y <= bottom:
+                    return name
         return None
+
+    def is_in_zone(self, camera_id: int, bbox) -> bool:
+        """Check scan-zone membership without extracting or storing appearance features."""
+        if int(camera_id) not in (1, 2, 3):
+            return False
+        return self._matching_profile(int(camera_id), bbox) is not None
 
     def process_frame(self, camera_id: int, frame_id: int, frame: np.ndarray,
                       tracks: Iterable[tuple[int, Iterable[float]]],
@@ -111,11 +132,18 @@ class FeatureZoneManager:
         # feature-sampling frame, so frame skipping cannot silently miss activation.
         visible: dict[int, tuple[float, float, float, float]] = {}
         for track_id, bbox in tracks:
-            track_id = int(track_id)
-            box = tuple(map(float, bbox))
-            visible[track_id] = box
+            visible[int(track_id)] = tuple(map(float, bbox))
+
+        # A closed track may only be re-armed after it is no longer visible;
+        # this prevents a boundary-touching track from opening a fresh gallery
+        # on every subsequent frame.
+        self._closed_tracks = {
+            key for key in self._closed_tracks
+            if key[0] != camera_id or key[1] in visible
+        }
+        for track_id, box in visible.items():
             key = (camera_id, track_id)
-            if key not in self._galleries:
+            if key not in self._galleries and key not in self._closed_tracks:
                 profile = self._matching_profile(camera_id, box)
                 if profile is not None:
                     self._galleries[key] = TrackGallery(camera_id, track_id, profile)
@@ -157,7 +185,13 @@ class FeatureZoneManager:
             gallery = self._galleries[(camera_id, track_id)]
             gallery.last_sample_frame = int(frame_id)
             if gallery.original:
-                similarity = float(self.features_manager.calculate_similarity(original, gallery.original[-1]))
+                # Temporal diversity sampling: compare only to the LAST ACCEPTED
+                # original embedding. If this view is redundant, do not advance the
+                # reference; the next sampled frame must still compare to the last
+                # embedding that actually entered the gallery.
+                similarity = float(
+                    self.features_manager.calculate_similarity(original, gallery.original[-1])
+                )
                 cosine_distance = 1.0 - similarity
                 self.last_comparison_by_track[track_id] = {
                     "cosine_similarity": similarity,
@@ -184,7 +218,10 @@ class FeatureZoneManager:
 
     def end_track(self, camera_id: int, track_id: int) -> dict[str, Any] | None:
         camera_id, track_id = int(camera_id), int(track_id)
-        gallery = self._galleries.pop((camera_id, track_id), None)
+        key = (camera_id, track_id)
+        gallery = self._galleries.pop(key, None)
+        if gallery is not None:
+            self._closed_tracks.add(key)
         # Track IDs can be reused after a gallery closes; don't show stale
         # similarity metrics for a future track with the same local ID.
         if not any(existing_track_id == track_id for _, existing_track_id in self._galleries):

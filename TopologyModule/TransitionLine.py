@@ -105,7 +105,7 @@ class TransitionLine:
         normal_length = self.length
         nx /= normal_length
         ny /= normal_length
-        tx, ty = -ny, nx
+        tx, ty = ny, -nx
 
         along = [
             (px - self.p1[0]) * tx + (py - self.p1[1]) * ty
@@ -209,7 +209,7 @@ class TransitionLine:
     def _swept_along_line_overlaps(self, previous_corners, current_corners) -> bool:
         """Проверяет overlap проекций двух bbox вдоль линии с самим отрезком."""
         nx, ny = self.normal
-        tx, ty = -ny, nx
+        tx, ty = ny, -nx
 
         along = [
             (px - self.p1[0]) * tx + (py - self.p1[1]) * ty

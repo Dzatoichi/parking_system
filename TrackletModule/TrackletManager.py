@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class TrackletManager:
-    def __init__(self, cam_id: int, similarity_threshold, frames_for_confirm, frames_for_lost):
+    def __init__(
+        self,
+        cam_id: int,
+        similarity_threshold: float = Config.REID_SIMILARITY_THRESHOLD,
+        frames_for_confirm: int = 3,
+        frames_for_lost: int = 5,
+    ):
         self.cam_id: int = cam_id
         self.similarity_threshold = similarity_threshold
         self.frames_for_confirm = frames_for_confirm

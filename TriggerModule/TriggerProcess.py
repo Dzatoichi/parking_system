@@ -19,6 +19,22 @@ class TriggerProcess:
         self.roi_y1 = None
         self.roi_y2 = None
 
+    @staticmethod
+    def is_triggered_bbox(box):
+        """Shared per-frame trigger predicate used by the main controller."""
+        x1, y1, x2, y2 = map(float, box)
+        return (x2 - x1) * (y2 - y1) >= Config.TRIGGER_TRACK_AREA_THRESHOLD
+
+    @staticmethod
+    def bbox_center_in_roi(box, frame_size=(1280, 720)):
+        """Use the same default ROI as run_trigger without opening another stream."""
+        x1, y1, x2, y2 = map(float, box)
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        width, height = frame_size
+        roi_x1, roi_x2 = 100, min(1200, width)
+        roi_y1, roi_y2 = min(200, height), min(700, height)
+        return roi_x1 <= cx <= roi_x2 and roi_y1 <= cy <= roi_y2
+
     def get_roi(self):
         roi_x1 = 100
         roi_x2 = 1200
@@ -106,9 +122,7 @@ class TriggerProcess:
             # ---------------------------
             for box, track_id in zip(boxes, ids):
                 x1, y1, x2, y2 = map(int, box)
-                area = (x2 - x1) * (y2 - y1)
-
-                if area >= Config.TRIGGER_TRACK_AREA_THRESHOLD:
+                if self.is_triggered_bbox(box):
                     self.cap.release()
                     return True
 

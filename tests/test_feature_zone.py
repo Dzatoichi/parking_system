@@ -24,14 +24,21 @@ class FakeFeaturesManager:
 
 
 class FeatureZoneManagerTests(unittest.TestCase):
-    def make_manager(self, feature_manager, polygon=None, interval=1, threshold=0.90):
+    def make_manager(self, feature_manager, rectangle=None, interval=1, threshold=0.90):
         import yaml
-        points = [[0, 0], [99, 0], [99, 99], [0, 99]] if polygon is None else polygon
+        if rectangle is False:
+            profiles = {}
+        else:
+            rectangle_cfg = (
+                {"p1": [0, 0], "p2": [99, 99]}
+                if rectangle is None else rectangle
+            )
+            profiles = {"LEFT": rectangle_cfg}
         config = {
             "sample_every_n_frames": interval,
             "similarity_threshold": threshold,
             "min_crop_size": 8,
-            "cameras": {"1": {"LEFT": points}},
+            "cameras": {"1": profiles},
         }
         tmp = tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8", delete=False)
         try:
@@ -71,7 +78,7 @@ class FeatureZoneManagerTests(unittest.TestCase):
 
     def test_outside_zone_is_ignored(self):
         fm = FakeFeaturesManager([])
-        manager = self.make_manager(fm, polygon=[[0, 0], [20, 0], [20, 20], [0, 20]])
+        manager = self.make_manager(fm, rectangle={"p1": [0, 0], "p2": [20, 20]})
         frame = np.ones((100, 100, 3), dtype=np.uint8)
         result = manager.process_frame(1, 0, frame, [(7, [40, 40, 70, 70])])
         self.assertEqual(result, {})
@@ -83,15 +90,15 @@ class FeatureZoneManagerTests(unittest.TestCase):
             np.array([0., 1.]), np.array([1., 0.]),
         ])
         manager = self.make_manager(
-            fm, polygon=[[0, 0], [20, 0], [20, 20], [0, 20]]
+            fm, rectangle={"p1": [0, 0], "p2": [20, 20]}
         )
         frame = np.ones((100, 100, 3), dtype=np.uint8)
-        # Camera-1 anchor (bottom center) is inside the polygon: activate track.
+        # Camera-1 anchor (bottom center) is inside the rectangle: activate track.
         self.assertEqual(
             manager.process_frame(1, 0, frame, [(7, [0, 0, 15, 15])]),
             {7: True},
         )
-        # The same track has left the polygon, but remains visible and is sampled.
+        # The same track has left the rectangle, but remains visible and is sampled.
         self.assertEqual(
             manager.process_frame(1, 1, frame, [(7, [30, 30, 60, 60])]),
             {7: True},
@@ -123,9 +130,9 @@ class FeatureZoneManagerTests(unittest.TestCase):
         self.assertEqual(manager.process_frame(1, 1, frame, [(7, [10, 10, 50, 50])]), {})
         self.assertEqual(fm.batches, [])
 
-    def test_empty_polygon_disables_profile(self):
+    def test_missing_zone_disables_profile(self):
         fm = FakeFeaturesManager([])
-        manager = self.make_manager(fm, polygon=[])
+        manager = self.make_manager(fm, rectangle=False)
         frame = np.ones((100, 100, 3), dtype=np.uint8)
         self.assertEqual(manager.process_frame(1, 0, frame, [(7, [10, 10, 50, 50])]), {})
 
@@ -135,8 +142,8 @@ class FeatureZoneManagerTests(unittest.TestCase):
         config = {
             "cameras": {
                 "2": {
-                    "LEFT": [[0, 0], [99, 0], [99, 99], [0, 99]],
-                    "RIGHT": [[100, 100], [199, 100], [199, 199], [100, 199]],
+                    "LEFT": {"p1": [0, 0], "p2": [99, 99]},
+                    "RIGHT": {"p1": [100, 100], "p2": [199, 199]},
                 }
             }
         }
@@ -174,6 +181,34 @@ class FeatureZoneManagerTests(unittest.TestCase):
         self.assertEqual(list(completed), [7])
         self.assertEqual(completed[7]["sample_count"], 1)
         self.assertEqual(manager.active_track_keys(), ())
+
+    def test_closed_gallery_does_not_reopen_until_track_disappears(self):
+        fm = FakeFeaturesManager([
+            np.array([1., 0.]), np.array([0., 1.]),
+            np.array([0., 1.]), np.array([1., 0.]),
+        ])
+        manager = self.make_manager(fm)
+        frame = np.ones((100, 100, 3), dtype=np.uint8)
+        self.assertEqual(
+            manager.process_frame(1, 0, frame, [(7, [10, 10, 50, 50])]),
+            {7: True},
+        )
+        self.assertIsNotNone(manager.end_track(1, 7))
+
+        # The same visible track must not silently start a fresh gallery.
+        self.assertEqual(
+            manager.process_frame(1, 1, frame, [(7, [10, 10, 50, 50])]),
+            {},
+        )
+        self.assertEqual(len(fm.batches), 1)
+
+        # Once the track disappears, a later reuse of its local ID can activate.
+        manager.process_frame(1, 2, frame, [])
+        self.assertEqual(
+            manager.process_frame(1, 3, frame, [(7, [10, 10, 50, 50])]),
+            {7: True},
+        )
+        self.assertEqual(len(fm.batches), 2)
 
     def test_end_track_is_scoped_to_camera_and_track(self):
         fm = FakeFeaturesManager([np.array([1., 0.]), np.array([0., 1.])])

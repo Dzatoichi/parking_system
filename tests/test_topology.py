@@ -43,8 +43,8 @@ def test_shipped_template_has_nine_cameras():
     network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
 
     assert network.camera_ids == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    # Camera 1 is explicitly outside the topology; camera 2 starts downstream.
     assert network.transitions == frozenset({
-        (1, 4), (4, 1), (1, 9), (9, 1),
         (2, 4), (4, 2), (2, 9), (9, 2),
         (3, 4), (4, 3), (3, 9), (9, 3),
         (4, 5), (5, 4), (5, 6), (6, 5),
@@ -190,11 +190,13 @@ def test_bbox_straddles_line_uses_two_edges_and_motion():
     assert transition_line.bbox_straddles_line((400, 550, 800, 650), (0, -20))
 
 
-def test_detector_uses_bbox_edges_not_center():
+def test_single_bbox_edge_touch_does_not_confirm_a_camera_transition():
     detector = CrossingDetector(CameraNetwork.from_dict(make_config()).camera(1), release_frames=1, release_margin_px=10)
-    # Центр остаётся выше линии, но bbox пересёк её двумя границами.
+    # The near edge enters the line, but the vehicle center has not crossed yet.
     assert detector.update(0, [(10, (400, 500, 800, 590))]) == []
-    events = detector.update(1, [(10, (400, 500, 800, 620))])
+    assert detector.update(1, [(10, (400, 500, 800, 620))]) == []
+    # A later center crossing confirms the transition.
+    events = detector.update(2, [(10, (400, 570, 800, 670))])
     assert len(events) == 1
     assert events[0].to_camera == 5
 

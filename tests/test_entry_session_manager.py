@@ -50,11 +50,29 @@ class EntrySessionManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager.bind_track(second.session_id, 2, 31)
 
-    def test_cameras_4_to_9_are_rejected(self):
+    def test_active_track_keys_use_camera_local_ids_and_only_active_sessions(self):
+        first = self.manager.register_entry(1, 11, 100)
+        self.manager.bind_track(first.session_id, 2, 31)
+        self.manager.bind_track(first.session_id, 3, 41)
+
+        second = self.manager.register_entry(1, 12, 101)
+        self.manager.bind_track(second.session_id, 2, 32)
+
+        self.assertEqual(
+            self.manager.active_track_keys(),
+            {(1, 11), (2, 31), (3, 41), (1, 12), (2, 32)},
+        )
+
+        self.manager.finish_on_camera2_track_lost(31)
+        self.assertEqual(self.manager.active_track_keys(), {(1, 12), (2, 32)})
+
+    def test_cameras_4_to_9_track_journeys_but_do_not_store_scan_galleries(self):
         session = self.manager.register_entry(1, 11, 100)
         for camera_id in range(4, 10):
+            bound = self.manager.bind_track(session.session_id, camera_id, 100 + camera_id)
+            self.assertEqual(bound.camera_tracks[camera_id], 100 + camera_id)
             with self.assertRaises(ValueError):
-                self.manager.bind_track(session.session_id, camera_id, 100 + camera_id)
+                self.manager.attach_gallery(session.session_id, camera_id, {})
 
 
 if __name__ == "__main__":

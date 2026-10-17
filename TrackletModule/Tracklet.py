@@ -74,9 +74,22 @@ class Tracklet:
         return normalized_displacement
 
     def update_feature(self, feature):
-        self.features.append(feature)
-        self.features = self.features[-5:]
-        self.mean_feature = np.mean(self.features, axis=0)
+        """Keep a small, bounded set of valid normalized appearance samples."""
+        vector = np.asarray(feature, dtype=np.float32).reshape(-1)
+        if vector.size == 0 or not np.isfinite(vector).all():
+            return
+        norm = float(np.linalg.norm(vector))
+        if norm <= 1e-12:
+            return
+
+        vector = vector / norm
+        self.features.append(vector)
+        max_features = max(1, int(getattr(Config, "TRACKLET_MAX_FEATURES", 5)))
+        self.features = self.features[-max_features:]
+
+        mean = np.mean(np.asarray(self.features, dtype=np.float32), axis=0)
+        mean_norm = float(np.linalg.norm(mean))
+        self.mean_feature = mean / mean_norm if mean_norm > 1e-12 else None
 
     def should_reid(self, frame_id: int) -> bool:
         return frame_id - self.last_reid_frame >= self.state.reid_interval

@@ -43,6 +43,8 @@ class EntrySessionManager:
     """
 
     FEATURE_CAMERAS = (1, 2, 3)
+    # Journey identity may traverse every configured camera; galleries stay on 1-3.
+    TRACKING_CAMERAS = frozenset(range(1, 10))
 
     def __init__(self) -> None:
         self._lock = RLock()
@@ -99,8 +101,8 @@ class EntrySessionManager:
     def bind_track(self, session_id: str, camera_id: int, track_id: int) -> EntrySession:
         """Attach a known corresponding local track to a specific session."""
         camera_id, track_id = int(camera_id), int(track_id)
-        if camera_id not in self.FEATURE_CAMERAS:
-            raise ValueError("Feature-session tracks are supported only on cameras 1, 2, and 3")
+        if camera_id not in self.TRACKING_CAMERAS:
+            raise ValueError(f"Unsupported camera ID for session tracking: {camera_id}")
         with self._lock:
             session = self._require_session(session_id)
             if session.status != "active":
@@ -169,6 +171,16 @@ class EntrySessionManager:
     def active_sessions(self) -> list[dict[str, Any]]:
         with self._lock:
             return [session.as_dict() for session in self._sessions if session.status == "active"]
+
+    def active_track_keys(self) -> set[tuple[int, int]]:
+        """Return exact camera-local track keys owned by active sessions only."""
+        with self._lock:
+            return {
+                (int(camera_id), int(track_id))
+                for session in self._sessions
+                if session.status == "active"
+                for camera_id, track_id in session.camera_tracks.items()
+            }
 
     def _require_session(self, session_id: str) -> EntrySession:
         session = self._by_id.get(str(session_id))

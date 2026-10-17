@@ -7,29 +7,42 @@ class Config:
 
     # Значения по умолчанию оставлены для локальной разработки,
     # на сервере переопределяются переменными окружения PARKING_DB_*
+    DB_ENABLED = os.getenv("PARKING_DB_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    DB_CONNECT_TIMEOUT = int(os.getenv("PARKING_DB_CONNECT_TIMEOUT", "5"))
     DB_PARAMS = {
         'database': os.getenv("PARKING_DB_NAME", "parking_db"),
-        'user': os.getenv("PARKING_DB_USER", "tracklet_manager"),
-        'password': os.getenv("PARKING_DB_PASSWORD", "tracklet_manager"),
+        'user': os.getenv("PARKING_DB_USER", "postgres"),
+        'password': os.getenv("PARKING_DB_PASSWORD", "postgres"),
         'host': os.getenv("PARKING_DB_HOST", "127.0.0.1"),
         'port': os.getenv("PARKING_DB_PORT", "5432"),
+        "connect_timeout": DB_CONNECT_TIMEOUT,
     }
 
     DEVICE: str = "cpu"
 
     # Local video files / RTSP URLs for cameras 1-9.
-    # Set unused sources to "". Feature capture currently processes only cameras 1-3;
-    # cameras 4-9 are configured here for the wider tracking pipeline, not Re-ID capture.
+    # Set unused sources to "". Scan/gallery capture runs on cameras 1-3;
+    # general RuntimeReID matching uses cameras 2-9. These are separate pipelines.
     CAMERA_VIDEO_PATHS = {
         1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/one-time/vezd.mov"),
         2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/one-time/sboku.mov"),
         3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/szadi.mov"),
-        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/1/5007.ts"),
-        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/1/5005_vniz.ts"),
-        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/1/5005_vverh.ts"),
-        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/1/5003_vniz.ts"),
-        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/1/5003_vverh.ts"),
-        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/1/5009.ts"),
+        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/one-time/5007.mov"),
+        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/one-time/5005_vniz.mov"),
+        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/one-time/5005_vverh.mov"),
+        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/one-time/5003_vniz.mov"),
+        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/one-time/5003_vverh.mov"),
+        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/one-time/5009.mov"),
+
+        # 1: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam1.ts"),
+        # 2: os.getenv("PARKING_CAMERA_2_VIDEO", "../video/22-04/cam2.ts"),
+        # 3: os.getenv("PARKING_CAMERA_3_VIDEO", "../video/22-04/cam3.ts"),
+        # 4: os.getenv("PARKING_CAMERA_4_VIDEO", "../video/22-04/cam4.ts"),
+        # 5: os.getenv("PARKING_CAMERA_5_VIDEO", "../video/22-04/cam5.mkv"),
+        # 6: os.getenv("PARKING_CAMERA_6_VIDEO", "../video/22-04/cam6.ts"),
+        # 7: os.getenv("PARKING_CAMERA_7_VIDEO", "../video/22-04/cam7.ts"),
+        # 8: os.getenv("PARKING_CAMERA_8_VIDEO", "../video/22-04/cam8.ts"),
+        # 9: os.getenv("PARKING_CAMERA_9_VIDEO", "../video/22-04/cam9.ts"),
     }
 
     # Сеть камер и линии перехода (см. TopologyModule, проверка: python check_topology.py)
@@ -88,14 +101,41 @@ class Config:
     TRIGGER_YOLO_TRACK_IOU_THRESHOLD = YOLO_TRACK_IOU_THRESHOLD
 
     EXTRACT_FRAMES_FOR_DETECT = 3
-    EXTRACT_SIM_THRESHOLD = 0.90
 
-    # --- Matcher ---
-    # Как сворачивать матрицу сходств tracklet x галерея в одно число:
-    #   "max"       - максимум по всем парам (поведение до правок, самый оптимистичный)
-    #   "topk_mean" - среднее по MATCH_SIM_TOPK лучшим парам (консервативнее)
-    MATCH_SIM_AGGREGATION = "max"
+    # --- Re-ID: все пороги и интервалы настройки в одном месте ---
+    # Порог разнообразия галереи: если новый embedding слишком похож на
+    # последний принятый, он считается дубликатом и не добавляется.
+    GALLERY_DUPLICATE_SIM_THRESHOLD = float(
+        os.getenv("PARKING_GALLERY_DUPLICATE_SIM_THRESHOLD", "0.90")
+    )
+    # Старое имя оставлено как совместимый alias для существующих модулей.
+    EXTRACT_SIM_THRESHOLD = GALLERY_DUPLICATE_SIM_THRESHOLD
+    GALLERY_SAMPLE_EVERY_N_FRAMES = int(
+        os.getenv("PARKING_GALLERY_SAMPLE_EVERY_N_FRAMES", "3")
+    )
+
+    # Порог принятия совпадения между камерами. Его можно снижать независимо
+    # от порога отбора разнообразных образцов в галерею.
+    REID_SIMILARITY_THRESHOLD = float(os.getenv("PARKING_REID_SIMILARITY_THRESHOLD", "0.65"))
+    # Оценка по среднему K лучших пар, чтобы не полагаться на один случайный пик.
+    MATCH_SIM_AGGREGATION = "topk_mean"
     MATCH_SIM_TOPK = 5
+    # Число tracklet'ов в одном матричном батче Matcher (ограничивает память).
+    MATCH_TRACKLET_BATCH_SIZE = 32
+    MATCH_VEHICLE_BATCH_SIZE = 32
+    # Сколько разных по времени эмбеддингов хранить в текущем tracklet.
+    TRACKLET_MAX_FEATURES = 5
+    # Runtime controller Re-ID sampling on all nine cameras.
+    RUNTIME_REID_EVERY_N_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_EVERY_N_FRAMES", "2"))
+    # Require more than one independent appearance sample before a cross-camera match.
+    RUNTIME_REID_MIN_SAMPLES = int(os.getenv("PARKING_RUNTIME_REID_MIN_SAMPLES", "2"))
+    RUNTIME_REID_DUPLICATE_THRESHOLD = float(os.getenv("PARKING_RUNTIME_REID_DUPLICATE_THRESHOLD", "0.92"))
+    REID_MATCH_MIN_MARGIN = float(os.getenv("PARKING_REID_MATCH_MIN_MARGIN", "0.04"))
+    # Candidate arrival must not predate the source EXIT task by default.
+    REID_MATCH_MAX_EARLY_FRAMES = int(os.getenv("PARKING_REID_MATCH_MAX_EARLY_FRAMES", "0"))
+    # Expire a handoff if no topology-eligible Re-ID match appears within this many target-camera frames.
+    RUNTIME_REID_PENDING_TTL_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_PENDING_TTL_FRAMES", "900"))
+    SCAN_FIFO_TTL_FRAMES = int(os.getenv("PARKING_SCAN_FIFO_TTL_FRAMES", "900"))
     # Сколько очков теряет кандидат на машину, если в этом цикле совпадения не было.
     # 1 - мягкое затухание, большое число (например 99) - требуем совпадения строго подряд.
     CANDIDATE_MISS_PENALTY = 1
@@ -105,4 +145,4 @@ class Config:
     # (должно быть больше track_buffer трекера, сейчас 30)
     TRACKLET_LOST_TTL_FRAMES = 150
     # Минимальная сторона кропа (px) для извлечения Re-ID признаков
-    FEATURE_MIN_CROP_SIZE = 8
+    FEATURE_MIN_CROP_SIZE = 24
