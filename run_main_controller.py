@@ -343,6 +343,10 @@ def main() -> None:
                     continue
 
                 read_frame_ids[camera_id] += 1
+                # Advance logical time for every decoded source frame, even when
+                # inference is skipped. Re-ID/OCR/transition cadence is based on
+                # source frames, not the reduced number of inference calls.
+                frame_ids[camera_id] += 1
                 # During identification, infer on every second decoded frame.
                 # Keep camera 1's existing lightweight idle trigger cadence intact.
                 if (camera_id != 1 or system_busy) and read_frame_ids[camera_id] % 2 == 1:
@@ -1059,7 +1063,6 @@ def main() -> None:
                 # cameras have been processed so scan-zone state is complete.
                 tiles[camera_id] = tile
                 last_tiles[camera_id] = tile
-                frame_ids[camera_id] += 1
 
             # When the final downstream journey/search task disappears, return
             # the display to camera 1. The trigger stream has remained active
