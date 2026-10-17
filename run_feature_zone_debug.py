@@ -39,8 +39,8 @@ from TopologyModule.CrossingDetector import CrossingDetector
 # =============================================================================
 # SETTINGS — change these in PyCharm, then press Run. No CLI arguments needed.
 # =============================================================================
-CAMERA_ID = 3
-VIDEO_SOURCE = r"videos/test_videos/1/side.ts"  # video path, webcam index as string ("0"), or RTSP URL
+CAMERA_ID = 1
+VIDEO_SOURCE = r"videos/test_videos/one-time/vezd.mov"  # video path, webcam index as string ("0"), or RTSP URL
 ENTRY_GATE = "LEFT"  # initial zone profile for camera 1/2: LEFT or RIGHT
 FRAME_SIZE = (1280, 720)
 SAMPLE_EVERY_N_FRAMES = 3
@@ -133,6 +133,7 @@ class Debugger:
         x1, y1 = map(int, zone_cfg["p1"])
         x2, y2 = map(int, zone_cfg["p2"])
         return (min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))
+
     def set_profile(self, profile: str):
         if CAMERA_ID in (1, 2) and profile not in ("LEFT", "RIGHT"):
             print("Для камер 1/2 выберите профиль LEFT или RIGHT.")
@@ -292,7 +293,6 @@ class Debugger:
                     break
                 elif key == ord(" "):
                     self.paused = not self.paused
-
                 elif key == ord("1"):
                     self.set_profile("LEFT")
                 elif key == ord("2"):
