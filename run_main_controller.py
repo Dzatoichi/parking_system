@@ -1000,9 +1000,12 @@ def main() -> None:
                     key = (camera_id, track_id)
                     x1, y1, x2, y2 = map(int, box)
                     global_id = journey_by_track.get(key)
-                    # Show the best current Re-ID confidence above every bbox. Diagnostic
-                    # scores compare the latest appearance against all identity galleries;
-                    # matched-pair scores are the fallback for topology-gated candidates.
+                    # Re-ID is diagnostic only outside the scan zones. Inside a scan
+                    # zone, keep the overlay focused on local ID and the known plate.
+                    in_scan_zone = (
+                        camera_id in FEATURE_CAMERAS
+                        and feature_managers[camera_id].is_in_zone(camera_id, box)
+                    )
                     diagnostic_match = runtime_reid.last_diagnostic_matches.get(key)
                     if diagnostic_match is not None:
                         reid_conf, best_journey_id, best_plate = diagnostic_match
@@ -1014,8 +1017,17 @@ def main() -> None:
                     else:
                         reid_conf = None
                         if key in runtime_reid.last_scores:
-                            reid_conf = runtime_reid.last_scores[key][1]
-                        reid_label = f"REID {reid_conf:.2f}" if reid_conf is not None else "REID --"
+                            matched_journey, reid_conf = runtime_reid.last_scores[key]
+                            matched_plate, _ = best_plate(
+                                journey_plate_votes.get(int(matched_journey), {})
+                            )
+                            compared_vehicle = (
+                                matched_plate if matched_plate != "UNKNOWN"
+                                else f"J{matched_journey}"
+                            )
+                            reid_label = f"REID {reid_conf:.2f} vs {compared_vehicle}"
+                        else:
+                            reid_label = "REID --"
 
                     if camera_id == 1:
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
@@ -1027,7 +1039,9 @@ def main() -> None:
                         color = (0, 0, 255)
                     cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
 
-                    label_parts = [f"LOCAL {track_id}", reid_label]
+                    label_parts = [f"LOCAL {track_id}"]
+                    if not in_scan_zone:
+                        label_parts.append(reid_label)
                     if global_id is not None and global_id < 0:
                         label_parts.append("SEARCHING")
                     elif global_id is not None and global_id > 0:
