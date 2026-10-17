@@ -27,6 +27,7 @@ class RuntimeReID:
         self.last_scores: dict[tuple[int, int], tuple[int, float]] = {}
         self.last_diagnostic_scores: dict[tuple[int, int], float] = {}
         self.last_diagnostic_matches: dict[tuple[int, int], tuple[float, int, str]] = {}
+        self.last_diagnostic_frames: dict[tuple[int, int], int] = {}
         # Avoid printing the same comparison on every video frame.
         self._last_match_log_state: dict[tuple[int, int, int], tuple] = {}
 
@@ -103,8 +104,30 @@ class RuntimeReID:
         mean_topk = float(np.partition(flat, flat.size - k)[-k:].mean())
         return best, mean_topk
 
+    @staticmethod
+    def _aggregate_similarity_score(best_score: float, mean_topk_score: float) -> float:
+        """Select the identity-decision score configured in Config.py.
+
+        BEST SIM remains a diagnostic maximum; acceptance and ranking use the
+        configured aggregation so one unusually high pair cannot decide identity.
+        """
+        aggregation = str(getattr(Config, "MATCH_SIM_AGGREGATION", "best")).strip().lower()
+        if aggregation == "topk_mean":
+            return float(mean_topk_score)
+        if aggregation == "best":
+            return float(best_score)
+        raise ValueError(
+            f"Unsupported MATCH_SIM_AGGREGATION={aggregation!r}; "
+            "expected 'topk_mean' or 'best'"
+        )
+
     def log_feature_against_all_identities(
-        self, camera_id: int, track_id: int, query_feature, identity_labels: dict[int, str]
+        self,
+        camera_id: int,
+        track_id: int,
+        query_feature,
+        identity_labels: dict[int, str],
+        frame_id: int | None = None,
     ) -> None:
         """Log one new local-track vector against every registered identity gallery.
 
@@ -130,6 +153,27 @@ class RuntimeReID:
             self.last_diagnostic_matches[key] = (
                 float(best_sim), int(best_journey_id), str(best_plate)
             )
+            sampled_at = frame_id if frame_id is not None else self.last_sample_frame.get(key, -1)
+            self.last_diagnostic_frames[key] = int(sampled_at)
+
+    def get_fresh_diagnostic_match(
+        self,
+        camera_id: int,
+        track_id: int,
+        frame_id: int,
+        max_age_frames: int | None = None,
+    ) -> tuple[float, int, str] | None:
+        """Return a recent diagnostic match, discarding scores that have aged out."""
+        key = (int(camera_id), int(track_id))
+        sampled_at = self.last_diagnostic_frames.get(key)
+        max_age = max(0, int(self.sample_every if max_age_frames is None else max_age_frames))
+        age = int(frame_id) - sampled_at if sampled_at is not None else max_age + 1
+        if sampled_at is None or age < 0 or age > max_age:
+            self.last_diagnostic_frames.pop(key, None)
+            self.last_diagnostic_scores.pop(key, None)
+            self.last_diagnostic_matches.pop(key, None)
+            return None
+        return self.last_diagnostic_matches.get(key)
 
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
         camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
@@ -154,8 +198,7 @@ class RuntimeReID:
         # displayed score artificially unchanged as the vehicle changes view.
         query_feature = track_features[-1:]
         best_score, mean_topk_score = self._similarity_scores(query_feature, gallery)
-        # Brute-force gallery search: the best single pair determines the decision.
-        score = best_score
+        score = self._aggregate_similarity_score(best_score, mean_topk_score)
         self.last_scores[(camera_id, track_id)] = (journey_id, score)
         result = "ACCEPT" if score >= self.threshold else "REJECT"
         # Feature counts change only when a new appearance sample is accepted, so
@@ -182,3 +225,4 @@ class RuntimeReID:
         self.last_scores.pop(key, None)
         self.last_diagnostic_scores.pop(key, None)
         self.last_diagnostic_matches.pop(key, None)
+        self.last_diagnostic_frames.pop(key, None)
