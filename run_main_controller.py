@@ -287,10 +287,11 @@ def main() -> None:
                 f"track={track_id} added_from_runtime={after_count-before_count} "
                 f"journey_total={after_count} source=runtime_track_history"
             )
-        elif journey_number is not None:
+        else:
             print(
-                f"[REID GALLERY EMPTY] journey={journey_number} camera={camera_id} "
-                f"track={track_id} reason=no_feature_zone_gallery_and_no_journey"
+                f"[REID GALLERY EMPTY] journey={journey_number if journey_number is not None else '-'} "
+                f"camera={camera_id} track={track_id} "
+                "reason=no_feature_zone_gallery_and_no_journey"
             )
 
         local_votes = plate_votes.get((camera_id, int(track_id)), {})
