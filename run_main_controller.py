@@ -29,8 +29,13 @@ from TopologyModule.TransitionTracker import CommandType, create_trackers
 
 
 def quiet_log(*args, **kwargs):
-    """Suppress verbose per-frame diagnostics while keeping call sites readable."""
-    return None
+    """Print actionable Re-ID/topology diagnostics; suppress unrelated verbose logs."""
+    message = " ".join(str(arg) for arg in args)
+    if any(tag in message for tag in (
+        "[REID ", "[BARRIER ARRIVAL]", "[UNIDENTIFIED HANDOFF]",
+        "[AMBIGUOUS EXIT]", "[GALLERY WAITING FOR EXIT]",
+    )):
+        print(message, **kwargs)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -143,9 +148,10 @@ def main() -> None:
     # Pending journeys and topology-arrived candidates, matched by ReID within each directed camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     arrived_candidates: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    # Scores and wait reasons for topology-eligible ReID handoffs only.
+    # Per-frame candidate scores refresh each frame; overlay state persists after assignment.
     reid_candidate_scores: dict[tuple[int, int], list[tuple[float, int, str]]] = defaultdict(list)
     reid_candidate_status: dict[tuple[int, int], str] = {}
+    reid_overlay_state: dict[tuple[int, int], dict] = {}
     scan_exclusion_logged: set[tuple[int, int]] = set()
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -254,7 +260,15 @@ def main() -> None:
             if journey_number is not None and camera_id in GALLERY_CAMERAS:
                 # Keep a temporary appearance gallery for unidentified journeys too;
                 # ReID can propagate a provisional journey without inventing a plate.
+                before_count = len(runtime_reid.identity_gallery.get(int(journey_number), []))
                 runtime_reid.add_identity_gallery(int(journey_number), gallery)
+                after_count = len(runtime_reid.identity_gallery.get(int(journey_number), []))
+                plate_label, _ = best_plate(journey_plate_votes.get(int(journey_number), {}))
+                print(
+                    f"[REID GALLERY] journey={journey_number} source_camera={camera_id} "
+                    f"track={track_id} added={feature_count} journey_total={after_count} "
+                    f"previous_total={before_count} plate={plate_label}"
+                )
             if database is not None and journey_number is not None and journey_number > 0:
                 for mirrored, key_name in ((False, "original"), (True, "flipped")):
                     for vector in gallery.get(key_name, []):
@@ -753,6 +767,16 @@ def main() -> None:
                         pending_reid[pair].append(
                             (journey_number, frame_ids.get(command.camera_id, 0))
                         )
+                        plate_for_task, _ = best_plate(journey_plate_votes.get(int(journey_number), {}))
+                        gallery_count = len(runtime_reid.identity_gallery.get(int(journey_number), []))
+                        print(
+                            f"[REID TASK CREATED] source={command.source_camera} "
+                            f"target={command.camera_id} route={command.source_camera}->{command.camera_id} "
+                            f"journey={journey_number} plate={plate_for_task} "
+                            f"gallery_features={gallery_count} "
+                            f"target_start_frame={frame_ids.get(command.camera_id, 0)} "
+                            f"pending_for_route={len(pending_reid[pair])}"
+                        )
                         if database is not None and journey_number > 0:
                             database.record_event(
                                 command.source_camera, command.track_id, command.frame_id,
@@ -795,6 +819,12 @@ def main() -> None:
                         print(
                             f"[TRANSITION] camera={command.camera_id} "
                             f"{command.source_camera}->{command.camera_id}"
+                        )
+                        print(
+                            f"[REID ARRIVAL] camera={command.camera_id} track={command.track_id} "
+                            f"route={command.source_camera}->{command.camera_id} frame={command.frame_id} "
+                            f"arrivals_for_route={len(arrived_candidates[pair])} "
+                            f"pending_for_route={len(pending_reid.get(pair, []))}"
                         )
                         quiet_log(
                             f"[BARRIER ARRIVAL] {pair[0]}->{pair[1]} "
@@ -928,6 +958,13 @@ def main() -> None:
                             query_feature = runtime_reid.last_query_features.get(key)
                             if query_feature is None:
                                 reid_candidate_status[key] = "WAIT FRAME FEATURE"
+                                plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
+                                print(
+                                    f"[REID COMPARE] camera={target_camera} frame={frame_id} "
+                                    f"track={candidate_id} route={source_camera}->{target_camera} "
+                                    f"journey={journey_id} plate={plate} result=WAIT "
+                                    f"reason=no_current_frame_embedding gallery_features={len(identity_features)}"
+                                )
                                 continue
                             decision_score = RuntimeReID._best_similarity(
                                 [query_feature], identity_features
@@ -941,6 +978,26 @@ def main() -> None:
                                 plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 reid_candidate_scores[(target_camera, int(candidate_id))].append(
                                     (float(decision_score), int(journey_id), plate)
+                                )
+                                overlay_key = (target_camera, int(candidate_id))
+                                previous_overlay = reid_overlay_state.get(overlay_key, {})
+                                previous_frame = int(previous_overlay.get("frame_id", -1))
+                                if frame_id >= previous_frame:
+                                    reid_overlay_state[overlay_key] = {
+                                        "score": float(decision_score),
+                                        "journey_id": int(journey_id),
+                                        "plate": plate,
+                                        "frame_id": int(frame_id),
+                                        "source_camera": int(source_camera),
+                                        "status": "PENDING",
+                                    }
+                                print(
+                                    f"[REID COMPARE] camera={target_camera} frame={frame_id} "
+                                    f"track={candidate_id} route={source_camera}->{target_camera} "
+                                    f"journey={journey_id} plate={plate} sim={decision_score:.4f} "
+                                    f"threshold={runtime_reid.threshold:.4f} "
+                                    f"gallery_features={len(identity_features)} "
+                                    f"result={'MATCH_THRESHOLD' if decision_score >= runtime_reid.threshold else 'BELOW_THRESHOLD'}"
                                 )
 
                     scored_pairs.sort(key=lambda item: item[0], reverse=True)
@@ -957,6 +1014,13 @@ def main() -> None:
                                 arrival_items.pop(arrival_index)
                                 journey_by_track[key] = journey_id
                                 reid_candidate_status.pop(key, None)
+                                overlay_state = reid_overlay_state.get(key)
+                                if overlay_state is not None:
+                                    overlay_state["status"] = "IDENTIFIED"
+                                    overlay_state["journey_id"] = int(journey_id)
+                                    overlay_state["plate"], _ = best_plate(
+                                        journey_plate_votes.get(int(journey_id), {})
+                                    )
                                 if database is not None and journey_id > 0 and target_camera not in GALLERY_CAMERAS:
                                     for vector in runtime_reid.track_features.get(key, []):
                                         database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
@@ -996,6 +1060,13 @@ def main() -> None:
                                 })
                                 match_plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
+                                print(
+                                    f"[REID IDENTIFIED] camera={target_camera} track={candidate_id} "
+                                    f"route={source_camera}->{target_camera} journey={journey_id} "
+                                    f"plate={match_plate} sim={score:.4f} "
+                                    f"threshold={runtime_reid.threshold:.4f} "
+                                    f"gallery_features={len(identity_features)}"
+                                )
                                 print(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         else:
                             reason = "below_similarity_threshold"
