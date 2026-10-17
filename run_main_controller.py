@@ -343,15 +343,10 @@ def main() -> None:
                     continue
 
                 read_frame_ids[camera_id] += 1
-                # Advance logical time for every decoded source frame, even when
-                # inference is skipped. Re-ID/OCR/transition cadence is based on
-                # source frames, not the reduced number of inference calls.
+                # Keep YOLO tracking continuous on every active source frame.
+                # Reduce Re-ID cost through RuntimeReID.sample_every instead of
+                # dropping frames before the tracker.
                 frame_ids[camera_id] += 1
-                # During identification, infer on every second decoded frame.
-                # Keep camera 1's existing lightweight idle trigger cadence intact.
-                if (camera_id != 1 or system_busy) and read_frame_ids[camera_id] % 2 == 1:
-                    continue
-
                 camera_times[camera_id] = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
                 frame = cv2.resize(raw, (1280, 720))
                 frame_id = frame_ids[camera_id]
