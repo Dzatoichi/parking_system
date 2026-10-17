@@ -506,6 +506,11 @@ def main() -> None:
                     reid_track_ids.update(
                         int(tid) for cam, tid in journey_by_track if cam == camera_id
                     )
+                    # The overlay needs a diagnostic embedding for every visible
+                    # non-scan track, not only moving tracks or topology candidates.
+                    # This does not grant identity: assignment remains topology-gated below.
+                    if runtime_reid.identity_gallery:
+                        reid_track_ids.update(int(tid) for tid, _bbox in tracks)
                     for (source_cam, target_cam), candidates in arrived_candidates.items():
                         if target_cam == camera_id and pending_reid.get((source_cam, target_cam)):
                             reid_track_ids.update(int(tid) for tid, _arrival_frame in candidates)
