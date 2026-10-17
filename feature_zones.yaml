@@ -1,49 +1,22 @@
+# Each zone is a rectangle defined by opposite corners p1 and p2.
+# Coordinates use the 1280x720 frame. Edit these values manually.
+# Cameras 1/2: LEFT and RIGHT. Camera 3: DEFAULT.
 cameras:
   '1':
     LEFT:
-    - - 171
-      - 268
-    - - 528
-      - 270
-    - - 557
-      - 149
-    - - 173
-      - 151
+      p1: [171, 149]
+      p2: [557, 270]
     RIGHT:
-    - - 832
-      - 279
-    - - 1184
-      - 304
-    - - 1197
-      - 199
-    - - 842
-      - 153
+      p1: [832, 153]
+      p2: [1197, 304]
   '2':
     LEFT:
-    - - 5
-      - 250
-    - - 483
-      - 249
-    - - 481
-      - 643
-    - - 2
-      - 637
+      p1: [2, 249]
+      p2: [483, 643]
     RIGHT:
-    - - 332
-      - 84
-    - - 490
-      - 79
-    - - 497
-      - 237
-    - - 348
-      - 246
+      p1: [332, 79]
+      p2: [497, 246]
   '3':
     DEFAULT:
-    - - 432
-      - 311
-    - - 896
-      - 313
-    - - 906
-      - 502
-    - - 429
-      - 490
+      p1: [429, 311]
+      p2: [906, 502]
