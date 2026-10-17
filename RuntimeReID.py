@@ -187,3 +187,4 @@ class RuntimeReID:
         self.track_features.pop(key, None)
         self.last_sample_frame.pop(key, None)
         self.last_scores.pop(key, None)
+        self.last_diagnostic_scores.pop(key, None)
