@@ -136,6 +136,8 @@ def main() -> None:
     # Pending journeys and topology-arrived candidates, matched by ReID within each directed camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     arrived_candidates: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    # Per-frame scores against every journey currently pending for this target camera.
+    reid_candidate_scores: dict[tuple[int, int], list[tuple[float, int, str]]] = defaultdict(list)
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -735,6 +737,11 @@ def main() -> None:
                             f"track={command.track_id} position={len(arrived_candidates[pair])}"
                         )
 
+                # Scores shown over boxes must correspond to all journeys actively
+                # waiting for this camera, not the best match against the entire gallery.
+                for score_key in [item for item in reid_candidate_scores if item[0] == camera_id]:
+                    reid_candidate_scores.pop(score_key, None)
+
                 # Resolve each directed barrier independently using topology-gated ReID scores.
                 # Low-confidence or ambiguous matches stay unresolved; never fall back to FIFO.
                 for (source_camera, target_camera), pending_items in list(pending_reid.items()):
@@ -855,6 +862,10 @@ def main() -> None:
                                     float(raw_score), int(journey_id), int(candidate_id),
                                     int(arrival_frame), pending_index, arrival_index
                                 ))
+                                plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
+                                reid_candidate_scores[(target_camera, int(candidate_id))].append(
+                                    (float(raw_score), int(journey_id), plate)
+                                )
 
                     scored_pairs.sort(key=lambda item: item[0], reverse=True)
                     if scored_pairs:
@@ -1000,34 +1011,31 @@ def main() -> None:
                     key = (camera_id, track_id)
                     x1, y1, x2, y2 = map(int, box)
                     global_id = journey_by_track.get(key)
-                    # Re-ID is diagnostic only outside the scan zones. Inside a scan
-                    # zone, keep the overlay focused on local ID and the known plate.
+                    # Only show scores against journeys actively waiting for this camera.
+                    # Scan-zone overlays intentionally omit Re-ID diagnostics.
                     in_scan_zone = (
                         camera_id in FEATURE_CAMERAS
                         and feature_managers[camera_id].is_in_zone(camera_id, box)
                     )
-                    diagnostic_match = runtime_reid.last_diagnostic_matches.get(key)
-                    if diagnostic_match is not None:
-                        reid_conf, best_journey_id, compared_plate = diagnostic_match
-                        compared_vehicle = (
-                            compared_plate if compared_plate and compared_plate != "UNKNOWN"
-                            else f"J{best_journey_id}"
-                        )
-                        reid_label = f"REID {reid_conf:.2f} vs {compared_vehicle}"
+                    candidate_scores = sorted(
+                        reid_candidate_scores.get(key, []),
+                        key=lambda item: item[0],
+                        reverse=True,
+                    )
+                    if candidate_scores:
+                        visible_scores = []
+                        for score, candidate_journey, candidate_plate in candidate_scores[:3]:
+                            candidate_name = (
+                                candidate_plate if candidate_plate and candidate_plate != "UNKNOWN"
+                                else f"J{candidate_journey}"
+                            )
+                            visible_scores.append(f"{candidate_name}:{score:.2f}")
+                        extra = len(candidate_scores) - len(visible_scores)
+                        if extra > 0:
+                            visible_scores.append(f"+{extra}")
+                        reid_label = "REID " + " ".join(visible_scores)
                     else:
-                        reid_conf = None
-                        if key in runtime_reid.last_scores:
-                            matched_journey, reid_conf = runtime_reid.last_scores[key]
-                            matched_plate, _ = best_plate(
-                                journey_plate_votes.get(int(matched_journey), {})
-                            )
-                            compared_vehicle = (
-                                matched_plate if matched_plate != "UNKNOWN"
-                                else f"J{matched_journey}"
-                            )
-                            reid_label = f"REID {reid_conf:.2f} vs {compared_vehicle}"
-                        else:
-                            reid_label = "REID --"
+                        reid_label = "REID --"
 
                     if camera_id == 1:
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
