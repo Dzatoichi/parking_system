@@ -412,6 +412,17 @@ def main() -> None:
                     sampled_embeddings = runtime_reid.update_camera(
                         camera_id, frame_id, frame, moving_tracks
                     )
+                    # Keep the visible BEST SIM diagnostic independent of whether
+                    # a topology handoff is currently pending. Refresh it whenever a
+                    # new Re-ID appearance sample is accepted for this local track.
+                    identity_labels = {
+                        int(journey_id): best_plate(votes)[0]
+                        for journey_id, votes in journey_plate_votes.items()
+                    }
+                    for sampled_track_id, vector in sampled_embeddings:
+                        runtime_reid.log_feature_against_all_identities(
+                            camera_id, int(sampled_track_id), vector, identity_labels
+                        )
 
                 # Use the current registration-zone logic from run_feature_capture:
                 # FeatureZoneManager activates a track when its configured anchor enters
@@ -999,12 +1010,21 @@ def main() -> None:
                         camera_id in FEATURE_CAMERAS
                         and feature_managers[camera_id].is_in_zone(camera_id, box)
                     )
+                    diagnostic_match = runtime_reid.last_diagnostic_matches.get(key)
                     candidate_scores = sorted(
                         reid_candidate_scores.get(key, []),
                         key=lambda item: item[0],
                         reverse=True,
                     )
-                    if candidate_scores:
+                    if diagnostic_match is not None:
+                        best_score, best_journey, best_plate_label = diagnostic_match
+                        best_name = (
+                            best_plate_label
+                            if best_plate_label and best_plate_label != "UNKNOWN"
+                            else f"J{best_journey}"
+                        )
+                        reid_label = f"BEST SIM {best_score:.2f} {best_name}"
+                    elif candidate_scores:
                         best_score, best_journey, best_plate_label = candidate_scores[0]
                         best_name = (
                             best_plate_label
