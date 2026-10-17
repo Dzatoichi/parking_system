@@ -1114,6 +1114,7 @@ def main() -> None:
                             else f"J{best_journey}"
                         )
                         suffix = (
+                            "IDENTIFIED" if global_id is not None else
                             candidate_status
                             if candidate_status and candidate_status not in {"WAITING", "SCORED"}
                             else "PENDING"
