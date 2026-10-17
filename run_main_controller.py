@@ -457,14 +457,16 @@ def main() -> None:
                                 in_zone_tracks.append((int(first_seen), int(scan_track_id), lane))
                         in_zone_tracks.sort(key=lambda item: (item[0], item[1]))
 
-                        max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
-                        # FIFO is lane-local: a LEFT arrival can never consume a RIGHT
-                        # registration. Keep searching when a lane has no eligible track.
+                        # Camera-1 and camera-2 triggers are processed in separate streams;
+                        # their local frame counters/timing must not decide identity. The
+                        # configured lane plus FIFO order is the contract for this handoff.
+                        # In particular, do not strand a target track just because its
+                        # first zone observation predates the source registration event.
+                        # FIFO is lane-local: LEFT can consume only LEFT, RIGHT only RIGHT.
                         for pending_index, (global_id, session_id, created_frame, pending_lane) in enumerate(list(scan_pending)):
                             eligible = [
                                 item for item in in_zone_tracks
                                 if item[2] == pending_lane
-                                and item[0] >= created_frame - max_early_frames
                             ]
                             if not eligible:
                                 continue
@@ -498,11 +500,13 @@ def main() -> None:
                                         "lane": lane,
                                         "first_zone_frame": first_seen,
                                         "registration_target_frame": created_frame,
+                                        "fifo_temporal_gate": "disabled_lane_order_only",
                                     },
                                 )
                             print(
                                 f"[SCAN FIFO MATCH] global_id={global_id} camera=1->2 "
-                                f"local_track={scan_track_id} lane={lane} first_zone_frame={first_seen}"
+                                f"local_track={scan_track_id} lane={lane} first_zone_frame={first_seen} "
+                                f"registration_target_frame={created_frame} match_method=lane_fifo"
                             )
                     # Camera-2 gallery closure is handled only by the topology EXIT
                     # command below for this exact track. Frame edges are not transitions.
