@@ -533,7 +533,7 @@ def main() -> None:
                             key = (1, int(tid))
                             if key not in registered_tracks:
                                 start_registration(int(tid), frame_id, tracks)
-                    if camera_id in OCR_CAMERAS and frame_id % max(1, Config.OCR_EVERY_N_FRAMES) == 0 and active_ids:
+                    if camera_id in OCR_CAMERAS and active_ids:
                         # Plate OCR is performed only at the entry camera. Camera 2
                         # inherits the registered identity after lane-constrained FIFO binding.
                         scan_zone_tracks = [
