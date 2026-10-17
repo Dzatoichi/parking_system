@@ -1038,7 +1038,13 @@ def main() -> None:
                             overlay_key = (target_camera, int(candidate_id))
                             previous_overlay = reid_overlay_state.get(overlay_key, {})
                             previous_frame = int(previous_overlay.get("frame_id", -1))
-                            if frame_id >= previous_frame:
+                            if (
+                                frame_id > previous_frame
+                                or (
+                                    frame_id == previous_frame
+                                    and float(decision_score) > float(previous_overlay.get("score", -2.0))
+                                )
+                            ):
                                 reid_overlay_state[overlay_key] = {
                                     "score": float(decision_score),
                                     "journey_id": int(journey_id),
@@ -1055,24 +1061,6 @@ def main() -> None:
                                 f"query_dim={query_dim} gallery_features={len(identity_features)} "
                                 f"result={'MATCH_THRESHOLD' if decision_score >= runtime_reid.threshold else 'BELOW_THRESHOLD'}"
                             )
-                                overlay_key = (target_camera, int(candidate_id))
-                                previous_overlay = reid_overlay_state.get(overlay_key, {})
-                                previous_frame = int(previous_overlay.get("frame_id", -1))
-                                if (
-                                    frame_id > previous_frame
-                                    or (
-                                        frame_id == previous_frame
-                                        and float(decision_score) > float(previous_overlay.get("score", -2.0))
-                                    )
-                                ):
-                                    reid_overlay_state[overlay_key] = {
-                                        "score": float(decision_score),
-                                        "journey_id": int(journey_id),
-                                        "plate": plate,
-                                        "frame_id": int(frame_id),
-                                        "source_camera": int(source_camera),
-                                        "status": "PENDING",
-                                    }
                                 print(
                                     f"[REID COMPARE] camera={target_camera} frame={frame_id} "
                                     f"track={candidate_id} route={source_camera}->{target_camera} "
