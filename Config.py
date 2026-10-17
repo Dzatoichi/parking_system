@@ -35,14 +35,14 @@ class Config:
         9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/one-time/5009.mov"),
 
         # 1: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam1.ts"),
-        # 2: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam2.ts"),
-        # 3: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam3.ts"),
-        # 4: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam4.ts"),
-        # 5: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam5.mkv"),
-        # 6: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam6.ts"),
-        # 7: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam7.ts"),
-        # 8: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam8.ts"),
-        # 9: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam9.ts"),
+        # 2: os.getenv("PARKING_CAMERA_2_VIDEO", "../video/22-04/cam2.ts"),
+        # 3: os.getenv("PARKING_CAMERA_3_VIDEO", "../video/22-04/cam3.ts"),
+        # 4: os.getenv("PARKING_CAMERA_4_VIDEO", "../video/22-04/cam4.ts"),
+        # 5: os.getenv("PARKING_CAMERA_5_VIDEO", "../video/22-04/cam5.mkv"),
+        # 6: os.getenv("PARKING_CAMERA_6_VIDEO", "../video/22-04/cam6.ts"),
+        # 7: os.getenv("PARKING_CAMERA_7_VIDEO", "../video/22-04/cam7.ts"),
+        # 8: os.getenv("PARKING_CAMERA_8_VIDEO", "../video/22-04/cam8.ts"),
+        # 9: os.getenv("PARKING_CAMERA_9_VIDEO", "../video/22-04/cam9.ts"),
     }
 
     # Сеть камер и линии перехода (см. TopologyModule, проверка: python check_topology.py)
