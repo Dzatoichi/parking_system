@@ -11,8 +11,8 @@ class Config:
     DB_CONNECT_TIMEOUT = int(os.getenv("PARKING_DB_CONNECT_TIMEOUT", "5"))
     DB_PARAMS = {
         'database': os.getenv("PARKING_DB_NAME", "parking_db"),
-        'user': os.getenv("PARKING_DB_USER", "tracklet_manager"),
-        'password': os.getenv("PARKING_DB_PASSWORD", "tracklet_manager"),
+        'user': os.getenv("PARKING_DB_USER", "postgres"),
+        'password': os.getenv("PARKING_DB_PASSWORD", "postgres"),
         'host': os.getenv("PARKING_DB_HOST", "127.0.0.1"),
         'port': os.getenv("PARKING_DB_PORT", "5432"),
         "connect_timeout": DB_CONNECT_TIMEOUT,
@@ -27,12 +27,22 @@ class Config:
         1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/one-time/vezd.mov"),
         2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/one-time/sboku.mov"),
         3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/szadi.mov"),
-        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/1/5007.ts"),
-        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/1/5005_vniz.ts"),
-        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/1/5005_vverh.ts"),
-        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/1/5003_vniz.ts"),
-        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/1/5003_vverh.ts"),
-        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/1/5009.ts"),
+        4: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5007.mov"),
+        5: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5005_vniz.mov"),
+        6: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5005_vverh.mov"),
+        7: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5003_vniz.mov"),
+        8: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5003_vverh.mov"),
+        9: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5009.mov"),
+
+        # 1: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam1.ts"),
+        # 2: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam2.ts"),
+        # 3: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam3.ts"),
+        # 4: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam4.ts"),
+        # 5: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam5.mkv"),
+        # 6: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam6.ts"),
+        # 7: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam7.ts"),
+        # 8: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam8.ts"),
+        # 9: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam9.ts"),
     }
 
     # Сеть камер и линии перехода (см. TopologyModule, проверка: python check_topology.py)
@@ -106,7 +116,7 @@ class Config:
 
     # Порог принятия совпадения между камерами. Его можно снижать независимо
     # от порога отбора разнообразных образцов в галерею.
-    REID_SIMILARITY_THRESHOLD = float(os.getenv("PARKING_REID_SIMILARITY_THRESHOLD", "0.92"))
+    REID_SIMILARITY_THRESHOLD = float(os.getenv("PARKING_REID_SIMILARITY_THRESHOLD", "0.65"))
     # Оценка по среднему K лучших пар, чтобы не полагаться на один случайный пик.
     MATCH_SIM_AGGREGATION = "topk_mean"
     MATCH_SIM_TOPK = 5
@@ -119,7 +129,7 @@ class Config:
     RUNTIME_REID_EVERY_N_FRAMES = int(os.getenv("PARKING_RUNTIME_REID_EVERY_N_FRAMES", "2"))
     # Require more than one independent appearance sample before a cross-camera match.
     RUNTIME_REID_MIN_SAMPLES = int(os.getenv("PARKING_RUNTIME_REID_MIN_SAMPLES", "2"))
-    RUNTIME_REID_DUPLICATE_THRESHOLD = float(os.getenv("PARKING_RUNTIME_REID_DUPLICATE_THRESHOLD", "0.90"))
+    RUNTIME_REID_DUPLICATE_THRESHOLD = float(os.getenv("PARKING_RUNTIME_REID_DUPLICATE_THRESHOLD", "0.92"))
     REID_MATCH_MIN_MARGIN = float(os.getenv("PARKING_REID_MATCH_MIN_MARGIN", "0.04"))
     # Candidate arrival must not predate the source EXIT task by default.
     REID_MATCH_MAX_EARLY_FRAMES = int(os.getenv("PARKING_REID_MATCH_MAX_EARLY_FRAMES", "0"))

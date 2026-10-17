@@ -87,7 +87,7 @@ cameras:
   - id: 9
     name: "Камера 9"
     lines: 
-      - {id: 1, p1: [50, 300], p2: [400, 300], peer: 8, exit: UP}
-      - {id: 2, p1: [1000, 300], p2: [1250, 300], peer: 2, exit: UP}
+      - {id: 1, p1: [50, 300], p2: [330, 270], peer: 8, exit: UP}
+      - {id: 2, p1: [1100, 270], p2: [1280, 300], peer: 2, exit: UP}
 
 segments: []

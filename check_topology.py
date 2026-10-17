@@ -15,7 +15,7 @@ from Config import Config
 from TopologyModule.CameraNetwork import CameraNetwork, TopologyError
 
 # --- Предпросмотр линий на кадре --------------------------------------------------
-VIDEO_PATH = r"D:\video\3\5009.ts"   # путь до видео камеры, например "../videos/cam1.mp4" (пусто - без предпросмотра)
+VIDEO_PATH = "videos/test_videos/3/5009.ts"   # путь до видео камеры, например "../videos/cam1.mp4" (пусто - без предпросмотра)
 CAMERA_ID = 9     # номер камеры из topology.yaml, линии которой нужно показать
 
 

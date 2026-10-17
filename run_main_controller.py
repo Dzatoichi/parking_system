@@ -1038,7 +1038,7 @@ def main() -> None:
                             if best_plate_label and best_plate_label != "UNKNOWN"
                             else f"J{best_journey}"
                         )
-                        reid_label = f"BEST SIM {best_score:.2f} {best_name}"
+                        reid_label = f"{best_score:.2f} {best_name}"
                     elif candidate_scores:
                         best_score, best_journey, best_plate_label = candidate_scores[0]
                         best_name = (
@@ -1046,9 +1046,9 @@ def main() -> None:
                             if best_plate_label and best_plate_label != "UNKNOWN"
                             else f"J{best_journey}"
                         )
-                        reid_label = f"BEST SIM {best_score:.2f} {best_name}"
+                        reid_label = f"{best_score:.2f} {best_name}"
                     else:
-                        reid_label = "BEST SIM --"
+                        reid_label = "--"
 
                     if camera_id == 1:
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
