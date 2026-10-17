@@ -279,7 +279,19 @@ def main() -> None:
         elif journey_number is not None:
             # If the feature-zone gallery was never activated, preserve the sampled
             # moving-track embeddings as the provisional/registered journey gallery.
+            before_count = len(runtime_reid.identity_gallery.get(int(journey_number), []))
             runtime_reid.extend_identity(int(journey_number), camera_id, int(track_id))
+            after_count = len(runtime_reid.identity_gallery.get(int(journey_number), []))
+            print(
+                f"[REID GALLERY] journey={journey_number} source_camera={camera_id} "
+                f"track={track_id} added_from_runtime={after_count-before_count} "
+                f"journey_total={after_count} source=runtime_track_history"
+            )
+        elif journey_number is not None:
+            print(
+                f"[REID GALLERY EMPTY] journey={journey_number} camera={camera_id} "
+                f"track={track_id} reason=no_feature_zone_gallery_and_no_journey"
+            )
 
         local_votes = plate_votes.get((camera_id, int(track_id)), {})
         if journey_number is not None:
@@ -468,6 +480,28 @@ def main() -> None:
                     sampled_embeddings = runtime_reid.update_camera(
                         camera_id, frame_id, frame, reid_tracks
                     )
+                    pending_routes_here = [
+                        (int(source), int(target), len(items))
+                        for (source, target), items in pending_reid.items()
+                        if target == camera_id and items
+                    ]
+                    arrival_routes_here = [
+                        (int(source), int(target), len(items))
+                        for (source, target), items in arrived_candidates.items()
+                        if target == camera_id and items
+                    ]
+                    if pending_routes_here or arrival_routes_here:
+                        query_ready_ids = sorted(
+                            int(track_id) for track_id, _bbox in reid_tracks
+                            if (camera_id, int(track_id)) in runtime_reid.last_query_features
+                        )
+                        print(
+                            f"[REID FRAME] camera={camera_id} frame={frame_id} "
+                            f"tracks={len(tracks)} runtime_reid_tracks={len(reid_tracks)} "
+                            f"query_ready_tracks={query_ready_ids} "
+                            f"pending_routes={pending_routes_here} arrival_routes={arrival_routes_here} "
+                            f"identity_galleries={len(runtime_reid.identity_gallery)}"
+                        )
                     # Compare the current frame only against identities in search tasks
                     # for this destination camera, and only for topology-arrived tracks.
                     # This is independent of whether the current embedding was accepted
@@ -1023,7 +1057,13 @@ def main() -> None:
                                 overlay_key = (target_camera, int(candidate_id))
                                 previous_overlay = reid_overlay_state.get(overlay_key, {})
                                 previous_frame = int(previous_overlay.get("frame_id", -1))
-                                if frame_id >= previous_frame:
+                                if (
+                                    frame_id > previous_frame
+                                    or (
+                                        frame_id == previous_frame
+                                        and float(decision_score) > float(previous_overlay.get("score", -2.0))
+                                    )
+                                ):
                                     reid_overlay_state[overlay_key] = {
                                         "score": float(decision_score),
                                         "journey_id": int(journey_id),
