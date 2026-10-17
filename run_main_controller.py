@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 import json
+import logging
+from logging.handlers import RotatingFileHandler
+import sys
 import time
 from pathlib import Path
 
@@ -28,6 +31,64 @@ from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
 
 
+ROOT = Path(__file__).resolve().parent
+LOG_PATH = ROOT / "reid_debug.log"
+LOG = logging.getLogger("parking_debug")
+
+
+class _LogTee:
+    """Keep normal terminal output while copying stdout/stderr into the rotating debug log."""
+
+    def __init__(self, stream, level):
+        self.stream = stream
+        self.level = level
+        self._buffer = ""
+
+    def write(self, text):
+        if not text:
+            return 0
+        written = self.stream.write(text)
+        self.stream.flush()
+        self._buffer += text
+        while "\\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\\n", 1)
+            if line.strip():
+                LOG.log(self.level, line.rstrip())
+        return written
+
+    def flush(self):
+        self.stream.flush()
+        if self._buffer.strip():
+            LOG.log(self.level, self._buffer.rstrip())
+        self._buffer = ""
+
+    def isatty(self):
+        return self.stream.isatty() if hasattr(self.stream, "isatty") else False
+
+    @property
+    def encoding(self):
+        return getattr(self.stream, "encoding", "utf-8")
+
+
+def configure_debug_log():
+    """Capture diagnostics and errors to a small, Git-shareable rotating log."""
+    handler = RotatingFileHandler(
+        LOG_PATH, mode="w", maxBytes=8 * 1024 * 1024, backupCount=1, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s.%(msecs)03d %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.DEBUG)
+    logging.captureWarnings(True)
+    sys.stdout = _LogTee(sys.__stdout__, logging.INFO)
+    sys.stderr = _LogTee(sys.__stderr__, logging.ERROR)
+    LOG.info("Debug log started: %s", LOG_PATH)
+
+
 def quiet_log(*args, **kwargs):
     """Print actionable Re-ID/topology diagnostics; suppress unrelated verbose logs."""
     message = " ".join(str(arg) for arg in args)
@@ -38,7 +99,6 @@ def quiet_log(*args, **kwargs):
         print(message, **kwargs)
 
 
-ROOT = Path(__file__).resolve().parent
 ZONES_PATH = ROOT / "feature_zones.yaml"
 TILE_SIZE = (640, 360)
 WINDOW_NAME = "Parking main controller"
@@ -1484,6 +1544,7 @@ def main() -> None:
 if __name__ == "__main__":
     import traceback
 
+    configure_debug_log()
     try:
         main()
     except BaseException:
