@@ -1003,10 +1003,19 @@ def main() -> None:
                     # Show the best current Re-ID confidence above every bbox. Diagnostic
                     # scores compare the latest appearance against all identity galleries;
                     # matched-pair scores are the fallback for topology-gated candidates.
-                    reid_conf = runtime_reid.last_diagnostic_scores.get(key)
-                    if reid_conf is None and key in runtime_reid.last_scores:
-                        reid_conf = runtime_reid.last_scores[key][1]
-                    reid_label = f"REID {reid_conf:.2f}" if reid_conf is not None else "REID --"
+                    diagnostic_match = runtime_reid.last_diagnostic_matches.get(key)
+                    if diagnostic_match is not None:
+                        reid_conf, best_journey_id, best_plate = diagnostic_match
+                        compared_vehicle = (
+                            best_plate if best_plate and best_plate != "UNKNOWN"
+                            else f"J{best_journey_id}"
+                        )
+                        reid_label = f"REID {reid_conf:.2f} vs {compared_vehicle}"
+                    else:
+                        reid_conf = None
+                        if key in runtime_reid.last_scores:
+                            reid_conf = runtime_reid.last_scores[key][1]
+                        reid_label = f"REID {reid_conf:.2f}" if reid_conf is not None else "REID --"
 
                     if camera_id == 1:
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
