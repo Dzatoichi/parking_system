@@ -91,10 +91,21 @@ class Config:
     TRIGGER_YOLO_TRACK_IOU_THRESHOLD = YOLO_TRACK_IOU_THRESHOLD
 
     EXTRACT_FRAMES_FOR_DETECT = 3
-    EXTRACT_SIM_THRESHOLD = 0.90
 
-    # --- Re-ID / Matcher ---
-    # Стартовый консервативный порог; его нужно калибровать на размеченных переходах.
+    # --- Re-ID: все пороги и интервалы настройки в одном месте ---
+    # Порог разнообразия галереи: если новый embedding слишком похож на
+    # последний принятый, он считается дубликатом и не добавляется.
+    GALLERY_DUPLICATE_SIM_THRESHOLD = float(
+        os.getenv("PARKING_GALLERY_DUPLICATE_SIM_THRESHOLD", "0.90")
+    )
+    # Старое имя оставлено как совместимый alias для существующих модулей.
+    EXTRACT_SIM_THRESHOLD = GALLERY_DUPLICATE_SIM_THRESHOLD
+    GALLERY_SAMPLE_EVERY_N_FRAMES = int(
+        os.getenv("PARKING_GALLERY_SAMPLE_EVERY_N_FRAMES", "3")
+    )
+
+    # Порог принятия совпадения между камерами. Его можно снижать независимо
+    # от порога отбора разнообразных образцов в галерею.
     REID_SIMILARITY_THRESHOLD = float(os.getenv("PARKING_REID_SIMILARITY_THRESHOLD", "0.92"))
     # Оценка по среднему K лучших пар, чтобы не полагаться на один случайный пик.
     MATCH_SIM_AGGREGATION = "topk_mean"
