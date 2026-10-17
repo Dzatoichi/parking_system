@@ -54,27 +54,35 @@ class FeatureZoneManager:
         # Latest comparison against the last accepted ORIGINAL embedding, per local track.
         # Kept between sampling frames so the UI can display it beneath the bbox.
         self.last_comparison_by_track: dict[int, dict[str, float]] = {}
-        self._polygons = self._parse_polygons(self.config.get("cameras", {}))
+        self._rectangles = self._parse_rectangles(self.config.get("cameras", {}))
 
     @staticmethod
-    def _parse_polygons(cameras: Mapping) -> dict[int, dict[str, np.ndarray]]:
-        parsed = {}
+    def _parse_rectangles(cameras: Mapping) -> dict[int, dict[str, tuple[int, int, int, int]]]:
+        """Parse rectangular zones from two opposite corners, p1 and p2."""
+        parsed: dict[int, dict[str, tuple[int, int, int, int]]] = {}
         for camera_key, camera_cfg in cameras.items():
             try:
                 camera_id = int(camera_key)
             except (TypeError, ValueError):
                 continue
             profiles = {}
-            for profile_name, points in (camera_cfg or {}).items():
-                if not points:
+            for profile_name, raw in (camera_cfg or {}).items():
+                if not raw:
                     continue
-                polygon = np.asarray(points, dtype=np.int32)
-                if polygon.ndim != 2 or polygon.shape[1] != 2 or len(polygon) < 3:
-                    raise ValueError(f"Camera {camera_id} profile {profile_name!r} needs >= 3 [x, y] points")
-                profiles[str(profile_name).upper()] = polygon
+                if not isinstance(raw, Mapping) or "p1" not in raw or "p2" not in raw:
+                    raise ValueError(f"Camera {camera_id} profile {profile_name!r} must define p1 and p2 rectangle corners")
+                p1, p2 = raw["p1"], raw["p2"]
+                if (not isinstance(p1, (list, tuple)) or len(p1) != 2 or not isinstance(p2, (list, tuple)) or len(p2) != 2):
+                    raise ValueError(f"Camera {camera_id} profile {profile_name!r}: p1/p2 must be [x, y]")
+                x1, y1 = int(p1[0]), int(p1[1])
+                x2, y2 = int(p2[0]), int(p2[1])
+                left, right = sorted((x1, x2))
+                top, bottom = sorted((y1, y2))
+                if left == right or top == bottom:
+                    raise ValueError(f"Camera {camera_id} profile {profile_name!r}: rectangle must have non-zero width and height")
+                profiles[str(profile_name).upper()] = (left, top, right, bottom)
             parsed[camera_id] = profiles
         return parsed
-
     @staticmethod
     def anchor(camera_id: int, bbox) -> tuple[float, float]:
         camera_id = int(camera_id)
@@ -87,18 +95,17 @@ class FeatureZoneManager:
             return (x1 + x2) / 2.0, y1
         return (x1 + x2) / 2.0, y2
 
-    @staticmethod
-    def _inside_polygon(point: tuple[float, float], polygon: np.ndarray) -> bool:
-        return cv2.pointPolygonTest(polygon, (float(point[0]), float(point[1])), False) >= 0
-
     def _matching_profile(self, camera_id: int, bbox) -> str | None:
-        profiles = self._polygons.get(int(camera_id), {})
+        profiles = self._rectangles.get(int(camera_id), {})
         candidates = ("LEFT", "RIGHT") if int(camera_id) in (1, 2) else ("DEFAULT",)
         point = self.anchor(camera_id, bbox)
-        # Deterministic priority if polygons overlap; ideally the two zones should not overlap.
+        # Deterministic priority if rectangles overlap; LEFT wins over RIGHT.
+        x, y = point
         for name in candidates:
-            if name in profiles and self._inside_polygon(point, profiles[name]):
-                return name
+            if name in profiles:
+                left, top, right, bottom = profiles[name]
+                if left <= x <= right and top <= y <= bottom:
+                    return name
         return None
 
     def is_in_zone(self, camera_id: int, bbox) -> bool:
