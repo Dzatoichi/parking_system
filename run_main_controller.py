@@ -28,6 +28,11 @@ from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
 
 
+def quiet_log(*args, **kwargs):
+    """Suppress verbose per-frame diagnostics while keeping call sites readable."""
+    return None
+
+
 ROOT = Path(__file__).resolve().parent
 ZONES_PATH = ROOT / "feature_zones.yaml"
 TILE_SIZE = (640, 360)
@@ -89,11 +94,9 @@ def main() -> None:
                 "server and configure PARKING_DB_HOST, PARKING_DB_PORT, PARKING_DB_NAME, "
                 "PARKING_DB_USER and PARKING_DB_PASSWORD."
             ) from exc
-        if False:
-        print("[DATABASE] PostgreSQL connected; schema ready (JSONB embeddings, no pgvector).")
+        quiet_log("[DATABASE] PostgreSQL connected; schema ready (JSONB embeddings, no pgvector).")
     network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
-    if False:
-    print("[CONTROLLER] Camera network:", network.camera_ids)
+    quiet_log("[CONTROLLER] Camera network:", network.camera_ids)
     for warning in network.warnings:
         print("[TOPOLOGY WARNING]", warning)
 
@@ -197,8 +200,7 @@ def main() -> None:
         target_frame = max(0, int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0))
         frame_ids[camera_id] = target_frame
         camera_times[camera_id] = target_seconds
-        if False:
-        print(
+        quiet_log(
             f"[STREAM] lazy-open camera={camera_id} at ~{target_seconds:.2f}s "
             f"(frame={target_frame}, fps={fps:.2f}): {source}"
         )
@@ -296,8 +298,7 @@ def main() -> None:
     try:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
-        if False:
-        print(
+        quiet_log(
             f"[CONTROLLER] Lazy mode: idle camera 1 skips {trigger_skip_frames - 1} "
             "frames between trigger inferences; active journeys use every frame; cameras 2-9 open on demand. Q/Esc exits."
         )
@@ -307,8 +308,7 @@ def main() -> None:
             # (or the next available stream) while continuing the controller loop.
             if display_camera_id not in captures:
                 display_camera_id = 1 if 1 in captures else min(captures)
-                if False:
-                print(f"[DISPLAY FOCUS] camera={display_camera_id} reason=focused_stream_unavailable")
+                quiet_log(f"[DISPLAY FOCUS] camera={display_camera_id} reason=focused_stream_unavailable")
             scan_zone_active_cameras: set[int] = set()
             tiles: dict[int, np.ndarray] = {}
             # Snapshot avoids processing a newly opened stream twice in the same controller cycle.
@@ -540,8 +540,7 @@ def main() -> None:
                             global_id = journey_by_track.get((camera_id, int(tid)))
                             track_key = (camera_id, int(tid))
                             if reading is None:
-                                if False:
-                                print(
+                                quiet_log(
                                     f"[OCR DIAG] camera={camera_id} frame={frame_id} "
                                     f"video_time={camera_times.get(camera_id, 0.0):.3f} "
                                     f"track={tid} journey={global_id if global_id is not None else '-'} "
@@ -551,8 +550,7 @@ def main() -> None:
 
                             accepted = reading.ocr_confidence >= Config.OCR_MIN_CHAR_CONFIDENCE
                             if not accepted:
-                                if False:
-                                print(
+                                quiet_log(
                                     f"[OCR DIAG] camera={camera_id} frame={frame_id} "
                                     f"video_time={camera_times.get(camera_id, 0.0):.3f} "
                                     f"track={tid} journey={global_id if global_id is not None else '-'} "
@@ -580,8 +578,7 @@ def main() -> None:
                                 best_plate(journey_plate_votes[int(global_id)])
                                 if global_id is not None else (local_plate, local_conf)
                             )
-                            if False:
-                            print(
+                            quiet_log(
                                 f"[OCR DIAG] camera={camera_id} frame={frame_id} "
                                 f"video_time={camera_times.get(camera_id, 0.0):.3f} "
                                 f"track={tid} journey={global_id if global_id is not None else '-'} "
@@ -622,8 +619,7 @@ def main() -> None:
                             if item.type is CommandType.SEARCH_ON_CAMERA
                             and item.track_id == command.track_id
                         )
-                        if False:
-                        print(
+                        quiet_log(
                             f"[AMBIGUOUS EXIT] camera={camera_id} track={command.track_id} "
                             f"simultaneous_targets={targets}; fix overlapping topology lines"
                         )
@@ -637,8 +633,7 @@ def main() -> None:
                             # has not identified it yet. Keep searching downstream.
                             journey_number = next_unidentified_journey
                             next_unidentified_journey -= 1
-                            if False:
-                            print(
+                            quiet_log(
                                 f"[UNIDENTIFIED HANDOFF] camera={command.source_camera} "
                                 f"local_id={command.track_id} provisional_journey={journey_number} "
                                 f"next_camera={command.camera_id}"
@@ -658,8 +653,7 @@ def main() -> None:
                         if command.camera_id in captures:
                             display_camera_id = command.camera_id
                             visual_camera_pool.add(command.camera_id)
-                            if False:
-                            print(
+                            quiet_log(
                                 f"[DISPLAY FOCUS] camera={display_camera_id} "
                                 f"reason=search_handoff from={command.source_camera} "
                                 f"journey={journey_number}"
@@ -717,8 +711,7 @@ def main() -> None:
                             )
                         pair = (int(command.source_camera), int(command.camera_id))
                         arrived_candidates[pair].append((int(command.track_id), int(command.frame_id)))
-                        if False:
-                        print(
+                        quiet_log(
                             f"[BARRIER ARRIVAL] {pair[0]}->{pair[1]} "
                             f"track={command.track_id} position={len(arrived_candidates[pair])}"
                         )
@@ -751,8 +744,7 @@ def main() -> None:
                                     target_camera_id=target_camera,
                                     details={"target_frames_waited": int(frame_id - created_target_frame)},
                                 )
-                            if False:
-                            print(
+                            quiet_log(
                                 f"[REID EXPIRED] journey={journey_id} "
                                 f"{source_camera}->{target_camera} after {frame_id - created_target_frame} target frames"
                             )
@@ -907,8 +899,7 @@ def main() -> None:
                                 if best[0] < runtime_reid.threshold
                                 else "ambiguous_score_margin"
                             )
-                            if False:
-                            print(
+                            quiet_log(
                                 f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                                 f"best_journey={best[1]} best_track={best[2]} "
                                 f"best_score={best[0]:.3f} threshold={runtime_reid.threshold:.3f} "
@@ -916,8 +907,7 @@ def main() -> None:
                                 f"reason={reason}; keep searching"
                             )
                     elif pending_items and arrival_items:
-                        if False:
-                        print(
+                        quiet_log(
                             f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                             f"pending={len(pending_items)} arrived={len(arrival_items)} "
                             "reason=insufficient_features_or_below_threshold"
@@ -956,8 +946,7 @@ def main() -> None:
                         # Preserve the journey/gallery state until this exact track
                         # crosses its configured EXIT line or the run ends.
                         track_last_seen.pop(stale_key, None)
-                        if False:
-                        print(
+                        quiet_log(
                             f"[GALLERY WAITING FOR EXIT] camera={camera_id} track={stale_track_id} "
                             f"journey={global_id} reason=track_lost_without_line_crossing"
                         )
@@ -1081,8 +1070,7 @@ def main() -> None:
                 and not scan_collection_active
             ):
                 display_camera_id = 1
-                if False:
-                print("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
+                quiet_log("[DISPLAY FOCUS] camera=1 reason=search_tasks_finished")
 
             # Camera 1 is permanent. Keep cameras 2/3 visible while any registered
             # journey is waiting for camera 2 or has a bound camera-2 track that has
@@ -1150,8 +1138,7 @@ def main() -> None:
                         for mirrored, key_name in ((False, "original"), (True, "flipped")):
                             for vector in gallery.get(key_name, []):
                                 database.save_embedding(global_id, cam, track_id, frame_ids.get(cam, 0), vector, mirrored)
-                if False:
-                print(
+                quiet_log(
                     f"[SHUTDOWN GALLERY] camera={cam} track={track_id} "
                     f"samples={sample_count} global_id={global_id if global_id is not None else '-'}"
                 )
@@ -1177,10 +1164,8 @@ def main() -> None:
             "database_writes": "enabled" if database is not None else "disabled",
         }
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        if False:
-        print(f"[CONTROLLER] Run report written to {REPORT_PATH}")
-        if False:
-        print("[CONTROLLER] Closed streams. Feature galleries closed:", dict(feature_closed))
+        quiet_log(f"[CONTROLLER] Run report written to {REPORT_PATH}")
+        quiet_log("[CONTROLLER] Closed streams. Feature galleries closed:", dict(feature_closed))
         if database is not None:
             database.close()
 
