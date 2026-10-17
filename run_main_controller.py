@@ -605,14 +605,6 @@ def main() -> None:
                             # the scan-zone/topology handoff. Do not compare it against
                             # every identity gallery merely because it is on camera 2+.
                             continue
-                        print(
-                            f"[REID DIAG START] camera={camera_id} frame={frame_id} "
-                            f"track={sampled_track_id} journey="
-                            f"{assigned_journey if assigned_journey is not None else '-'} "
-                            f"reason={'provisional_unidentified' if assigned_journey is not None else 'not_yet_bound'} "
-                            f"query_samples={len(runtime_reid.track_features.get(sampled_key, []))} "
-                            f"gallery_count={len(runtime_reid.identity_gallery)}"
-                        )
                         runtime_reid.log_feature_against_all_identities(
                             camera_id, int(sampled_track_id), vector, identity_labels
                         )
