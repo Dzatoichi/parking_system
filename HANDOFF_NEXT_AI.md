@@ -81,5 +81,6 @@ Before treating runtime behavior as fully verified, test using the intended vide
 - Never treat a local `track_id` as a global journey ID.
 - Never treat BEST SIM alone as a confirmed match: assignment also requires a topology-arrived candidate and an active search task for that target camera.
 - Do not weaken topology or identity-threshold requirements to force matches.
+- Re-ID troubleshooting logs use `[REID GALLERY]`, `[REID TASK CREATED]`, `[REID ARRIVAL]`, `[REID FRAME]`, `[REID EMBEDDING]`, `[REID COMPARE]`, and `[REID IDENTIFIED]`. Read them in order: verify source gallery count first, then task/arrival route, then query embedding, then score vs threshold. Do not assume a missing overlay means a low similarity: overlay state is kept after assignment and shows the assigned journey's current-frame score.
 - OCR failure or latency must not stop visual feature capture.
 - Do not describe real controller DB writes as mocked, and do not claim a full video/model-runtime test ran unless it actually did.
