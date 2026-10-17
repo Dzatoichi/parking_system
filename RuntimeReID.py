@@ -24,6 +24,9 @@ class RuntimeReID:
         self.identity_gallery: dict[int, list[np.ndarray]] = defaultdict(list)
         self.track_features: dict[tuple[int, int], list[np.ndarray]] = defaultdict(list)
         self.last_sample_frame: dict[tuple[int, int], int] = {}
+        # Latest embedding extracted from the current frame, even when it is rejected
+        # from the stored gallery as a near-duplicate. Matching is frame-by-frame.
+        self.last_query_features: dict[tuple[int, int], np.ndarray] = {}
         self.last_scores: dict[tuple[int, int], tuple[int, float]] = {}
         self.last_diagnostic_scores: dict[tuple[int, int], float] = {}
         self.last_diagnostic_matches: dict[tuple[int, int], tuple[float, int, str]] = {}
@@ -80,6 +83,7 @@ class RuntimeReID:
             normalized = self._valid(vector)
             if normalized is None:
                 continue
+            self.last_query_features[key] = normalized.copy()
             gallery = self.track_features[key]
             # Adaptive sampling: compare only with the last accepted view. Do not
             # advance the reference when a near-duplicate is rejected.
@@ -110,23 +114,28 @@ class RuntimeReID:
         query_feature,
         identity_labels: dict[int, str],
         frame_id: int | None = None,
+        journey_ids: set[int] | None = None,
     ) -> None:
-        """Log one new local-track vector against every registered identity gallery.
+        """Compare the current-frame embedding with active search-task galleries.
 
-        For each identity, best_sim is the maximum cosine similarity across all
-        accepted embeddings for this local track and all vectors stored in that
-        identity's gallery. This is diagnostic only; it does not assign identity.
+        Each score is the maximum cosine similarity between this frame's embedding
+        and every vector in one journey gallery. When journey_ids is supplied, only
+        journeys currently being searched on this target camera are considered.
+        This records diagnostics; the controller owns assignment decisions.
         """
         query = self._valid(query_feature)
         if query is None:
             return
         key = (int(camera_id), int(track_id))
         comparisons = []
+        allowed_ids = (
+            {int(journey_id) for journey_id in journey_ids}
+            if journey_ids is not None else set(self.identity_gallery)
+        )
         for journey_id, gallery in self.identity_gallery.items():
-            if not gallery:
+            if int(journey_id) not in allowed_ids or not gallery:
                 continue
-            track_gallery = self.track_features.get(key, [query])
-            best_sim = self._best_similarity(track_gallery, gallery)
+            best_sim = self._best_similarity([query], gallery)
             plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
@@ -206,6 +215,7 @@ class RuntimeReID:
         key = (int(camera_id), int(track_id))
         self.track_features.pop(key, None)
         self.last_sample_frame.pop(key, None)
+        self.last_query_features.pop(key, None)
         self.last_scores.pop(key, None)
         self.last_diagnostic_scores.pop(key, None)
         self.last_diagnostic_matches.pop(key, None)
