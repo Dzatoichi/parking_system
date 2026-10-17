@@ -63,9 +63,18 @@ class RuntimeReID:
             x1, x2 = max(0, x1), min(w, x2)
             y1, y2 = max(0, y1), min(h, y2)
             if x2 - x1 < Config.FEATURE_MIN_CROP_SIZE or y2 - y1 < Config.FEATURE_MIN_CROP_SIZE:
+                print(
+                    f"[REID EMBEDDING] camera={camera_id} frame={frame_id} track={track_id} "
+                    f"result=SKIP reason=crop_too_small crop={x2-x1}x{y2-y1} "
+                    f"min_side={Config.FEATURE_MIN_CROP_SIZE}"
+                )
                 continue
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
+                print(
+                    f"[REID EMBEDDING] camera={camera_id} frame={frame_id} track={track_id} "
+                    "result=SKIP reason=empty_crop"
+                )
                 continue
             images.append(crop)
             keys.append(key)
@@ -74,8 +83,12 @@ class RuntimeReID:
             return []
         try:
             vectors = self.feature_manager.extract_features(images)
-        except Exception:
+        except Exception as exc:
             logger.exception("Runtime Re-ID extraction failed on camera %s", camera_id)
+            print(
+                f"[REID EMBEDDING ERROR] camera={camera_id} frame={frame_id} "
+                f"tracks={[key[1] for key in keys]} error={type(exc).__name__}: {exc}"
+            )
             return []
         accepted = []
         duplicate_threshold = float(
@@ -84,15 +97,34 @@ class RuntimeReID:
         for key, vector in zip(keys, vectors):
             normalized = self._valid(vector)
             if normalized is None:
+                print(
+                    f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
+                    "result=INVALID reason=zero_norm_or_non_finite"
+                )
                 continue
             self.last_query_features[key] = normalized.copy()
             gallery = self.track_features[key]
-            # Adaptive sampling: compare only with the last accepted view. Do not
-            # advance the reference when a near-duplicate is rejected.
-            if gallery and float(np.dot(normalized, gallery[-1])) >= duplicate_threshold:
+            duplicate_sim = float(np.dot(normalized, gallery[-1])) if gallery else None
+            # Adaptive sampling filters stored history only; every valid current-frame
+            # embedding remains available to the matching/overlay path.
+            if duplicate_sim is not None and duplicate_sim >= duplicate_threshold:
+                print(
+                    f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
+                    f"result=QUERY_READY_STORED_NO duplicate_sim={duplicate_sim:.3f} "
+                    f"duplicate_threshold={duplicate_threshold:.3f} "
+                    f"history_features={len(gallery)} query_dim={normalized.size}"
+                )
                 continue
             gallery.append(normalized)
             accepted.append((key[1], normalized.copy()))
+            print(
+                f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
+                f"result=QUERY_READY_AND_STORED duplicate_sim="
+                f"{duplicate_sim:.3f}" if duplicate_sim is not None else
+                f"[REID EMBEDDING] camera={key[0]} frame={frame_id} track={key[1]} "
+                f"result=FIRST_QUERY_STORED "
+                f"history_features={len(gallery)} query_dim={normalized.size}"
+            )
         return accepted
 
     @staticmethod
