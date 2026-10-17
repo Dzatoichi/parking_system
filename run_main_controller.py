@@ -1061,14 +1061,6 @@ def main() -> None:
                                 f"query_dim={query_dim} gallery_features={len(identity_features)} "
                                 f"result={'MATCH_THRESHOLD' if decision_score >= runtime_reid.threshold else 'BELOW_THRESHOLD'}"
                             )
-                                print(
-                                    f"[REID COMPARE] camera={target_camera} frame={frame_id} "
-                                    f"track={candidate_id} route={source_camera}->{target_camera} "
-                                    f"journey={journey_id} plate={plate} sim={decision_score:.4f} "
-                                    f"threshold={runtime_reid.threshold:.4f} "
-                                    f"gallery_features={len(identity_features)} "
-                                    f"result={'MATCH_THRESHOLD' if decision_score >= runtime_reid.threshold else 'BELOW_THRESHOLD'}"
-                                )
 
                     scored_pairs.sort(key=lambda item: item[0], reverse=True)
                     if scored_pairs:
