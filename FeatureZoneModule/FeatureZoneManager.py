@@ -34,9 +34,11 @@ class FeatureZoneManager:
         self.features_manager = features_manager
         with open(config_path, "r", encoding="utf-8") as stream:
             self.config = yaml.safe_load(stream) or {}
-        threshold = self.config.get("similarity_threshold", 0.90) if similarity_threshold is None else similarity_threshold
-        interval = self.config.get("sample_every_n_frames", 3) if sample_every_n_frames is None else sample_every_n_frames
-        crop_size = self.config.get("min_crop_size", 8) if min_crop_size is None else min_crop_size
+        # Thresholds and sampling intervals are centralized in Config.py.
+        # feature_zones.yaml contains camera geometry only.
+        threshold = Config.GALLERY_DUPLICATE_SIM_THRESHOLD if similarity_threshold is None else similarity_threshold
+        interval = Config.GALLERY_SAMPLE_EVERY_N_FRAMES if sample_every_n_frames is None else sample_every_n_frames
+        crop_size = Config.FEATURE_MIN_CROP_SIZE if min_crop_size is None else min_crop_size
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("similarity_threshold must be between 0 and 1")
         if interval < 1:
