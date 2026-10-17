@@ -1,5 +1,7 @@
 # Запуск сбора признаков с триггером
 
+> Эта инструкция описывает облегчённый runner `run_feature_capture.py` для проверки capture-flow. Интегрированный девятикамерный controller — `run_main_controller.py`; его Re-ID, handoff и DB-поведение описаны в `HANDOFF_NEXT_AI.md` и `ARCHITECTURE_RULES.md`.
+
 ## Быстрый запуск
 
 1. В `Config.py` заполните `Config.CAMERA_VIDEO_PATHS` для камер 1–3. Путь может быть абсолютным или относительным к корню проекта. Можно также задать переменные окружения `PARKING_CAMERA_1_VIDEO` … `PARKING_CAMERA_9_VIDEO`.
