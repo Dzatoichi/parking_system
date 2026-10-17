@@ -54,6 +54,8 @@ class RuntimeReID:
         images, keys = [], []
         for track_id, bbox in tracks:
             key = (int(camera_id), int(track_id))
+            # Never reuse a previous frame's query when this frame has no valid crop.
+            self.last_query_features.pop(key, None)
             if frame_id - self.last_sample_frame.get(key, -self.sample_every) < self.sample_every:
                 continue
             h, w = frame.shape[:2]
