@@ -144,7 +144,6 @@ class Debugger:
             print("Камеры 4-9 не участвуют в сборе признаков.")
             return
         self.profile = profile
-        self.pending_points.clear()
         print(f"Активный профиль зоны: camera={CAMERA_ID}, profile={self.profile}")
 
     def draw_line(self, image, p1, p2, color, label, thickness=2):
