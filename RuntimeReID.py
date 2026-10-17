@@ -176,32 +176,37 @@ class RuntimeReID:
         return self.last_diagnostic_matches.get(key)
 
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
+        """Compare the current-frame query with every embedding in one journey gallery."""
         camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
-        track_features = self.track_features.get((camera_id, track_id), [])
+        key = (camera_id, track_id)
+        query = self.last_query_features.get(key)
+        if query is None:
+            # Compatibility for callers/tests that populate accepted track history directly.
+            history = self.track_features.get(key, [])
+            query = history[-1] if history else None
         gallery = self.identity_gallery.get(journey_id, [])
         log_key = (camera_id, track_id, journey_id)
 
-        if len(track_features) < self.min_samples or not gallery:
-            state = (len(track_features), len(gallery), None, "INSUFFICIENT_FEATURES")
+        if query is None or not gallery:
+            state = (
+                len(self.track_features.get(key, [])), len(gallery), None,
+                "INSUFFICIENT_FEATURES",
+            )
             if self._last_match_log_state.get(log_key) != state:
                 print(
                     f"[REID SIM] camera={camera_id} track={track_id} journey={journey_id} "
-                    f"sim=NA track_features={len(track_features)} "
-                    f"journey_features={len(gallery)} min_track_features={self.min_samples} "
-                    f"result=INSUFFICIENT_FEATURES"
+                    f"sim=NA query_available={query is not None} "
+                    f"journey_features={len(gallery)} result=INSUFFICIENT_FEATURES"
                 )
                 self._last_match_log_state[log_key] = state
             return None
 
-        # Best similarity means the strongest pair across every accepted sample
-        # of this current track and every sample in the journey gallery. No top-k
-        # averaging: a strong matching view must not be diluted by other viewpoints.
-        score = self._best_similarity(track_features, gallery)
-        self.last_scores[(camera_id, track_id)] = (journey_id, score)
+        # Every frame is evaluated independently against the full registered gallery.
+        # Near-duplicate filtering only decides whether the query is stored in history.
+        score = self._best_similarity([query], gallery)
+        self.last_scores[key] = (journey_id, score)
         result = "ACCEPT" if score >= self.threshold else "REJECT"
-        # Feature counts change only when a new appearance sample is accepted, so
-        # this prints useful score updates without flooding the log every frame.
-        state = (len(track_features), len(gallery), round(float(score), 3), result)
+        state = (len(self.track_features.get(key, [])), len(gallery), round(float(score), 3), result)
         if self._last_match_log_state.get(log_key) != state:
             self._last_match_log_state[log_key] = state
         return score if score >= self.threshold else None
