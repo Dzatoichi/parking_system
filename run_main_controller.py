@@ -1291,6 +1291,8 @@ def main() -> None:
                         )
                         if global_id is not None:
                             suffix = "IDENTIFIED"
+                        elif candidate_status and candidate_status not in {"WAITING", "SCORED"}:
+                            suffix = candidate_status
                         else:
                             age = max(0, frame_id - int(overlay_state.get("frame_id", frame_id)))
                             suffix = f"LAST {age}f" if age else "PENDING"
