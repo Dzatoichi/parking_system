@@ -72,14 +72,14 @@ The source-camera handoff lifecycle still has a known issue: on a source EXIT, t
 
 The lightweight CI checks should compile the changed runtime modules and execute the test suite in `tests/`. They do not exercise actual video streams, OSNet/OCR weights, camera synchronization, or a live PostgreSQL instance.
 
-Before treating runtime behavior as fully verified, test using the intended video files and model weights. In particular, confirm the lane-constrained 1→2 scan FIFO, camera-3 FIFO handoff, Re-ID score/margin behavior on other transitions, and database settings. Unit tests cannot replace a real-video integration run.
+Before treating runtime behavior as fully verified, test using the intended video files and model weights. In particular, confirm the lane-constrained 1→2 scan FIFO, camera-3 FIFO handoff, current-frame Re-ID threshold behavior on other transitions, and database settings. Unit tests cannot replace a real-video integration run.
 
 ## Constraints to preserve
 
 - Scan-gallery capture remains limited to cameras 1–3; general RuntimeReID remains a separate cameras 2–9 process.
 - Exclude only the exact active scan-owned track keys on cameras 2/3.
 - Never treat a local `track_id` as a global journey ID.
-- Never treat diagnostic BEST SIM as a confirmed match.
-- Do not weaken topology, threshold, margin, or minimum-feature requirements to force matches.
+- Never treat BEST SIM alone as a confirmed match: assignment also requires a topology-arrived candidate and an active search task for that target camera.
+- Do not weaken topology or identity-threshold requirements to force matches.
 - OCR failure or latency must not stop visual feature capture.
 - Do not describe real controller DB writes as mocked, and do not claim a full video/model-runtime test ran unless it actually did.
