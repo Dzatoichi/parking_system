@@ -190,11 +190,13 @@ def test_bbox_straddles_line_uses_two_edges_and_motion():
     assert transition_line.bbox_straddles_line((400, 550, 800, 650), (0, -20))
 
 
-def test_detector_uses_bbox_edges_not_center():
+def test_single_bbox_edge_touch_does_not_confirm_a_camera_transition():
     detector = CrossingDetector(CameraNetwork.from_dict(make_config()).camera(1), release_frames=1, release_margin_px=10)
-    # Центр остаётся выше линии, но bbox пересёк её двумя границами.
+    # The near edge enters the line, but the vehicle center has not crossed yet.
     assert detector.update(0, [(10, (400, 500, 800, 590))]) == []
-    events = detector.update(1, [(10, (400, 500, 800, 620))])
+    assert detector.update(1, [(10, (400, 500, 800, 620))]) == []
+    # A later center crossing confirms the transition.
+    events = detector.update(2, [(10, (400, 570, 800, 670))])
     assert len(events) == 1
     assert events[0].to_camera == 5
 
