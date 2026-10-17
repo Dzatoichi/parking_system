@@ -43,8 +43,8 @@ def test_shipped_template_has_nine_cameras():
     network = CameraNetwork.from_yaml(Config.TOPOLOGY_CONFIG_PATH)
 
     assert network.camera_ids == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    # Camera 1 is explicitly outside the topology; camera 2 starts downstream.
     assert network.transitions == frozenset({
-        (1, 4), (4, 1), (1, 9), (9, 1),
         (2, 4), (4, 2), (2, 9), (9, 2),
         (3, 4), (4, 3), (3, 9), (9, 3),
         (4, 5), (5, 4), (5, 6), (6, 5),
