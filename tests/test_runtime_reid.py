@@ -80,12 +80,16 @@ class RuntimeReIDTests(unittest.TestCase):
         )
         self.assertNotIn((4, 12), self.reid.last_diagnostic_matches)
 
-    def test_adaptive_sampling_rejects_a_duplicate_of_last_accepted_view(self):
+    def test_adaptive_sampling_rejects_duplicate_for_storage_but_keeps_current_query(self):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
         track = [(12, [10, 10, 80, 80])]
         self.reid.update_camera(4, 0, frame, track)
         self.reid.update_camera(4, 1, frame, track)
         self.assertEqual(len(self.reid.track_features[(4, 12)]), 1)
+        # Matching still sees this frame even though its vector was not stored twice.
+        np.testing.assert_allclose(
+            self.reid.last_query_features[(4, 12)], np.array([1.0, 0.0], dtype=np.float32)
+        )
 
     def test_ignores_invalid_embedding(self):
         self.assertIsNone(RuntimeReID._valid(np.array([0.0, 0.0])))
