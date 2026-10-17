@@ -110,13 +110,14 @@ def test_stationary_car_on_the_line_gives_no_event():
     assert drive(detector(), 7, [(640, 360)] * 30) == []
 
 
-def test_jitter_around_the_line_does_not_repeat_the_event():
+def test_bbox_edge_jitter_without_center_crossing_does_not_trigger():
     det = detector(release_frames=3)
-    # дошёл до линии (нижний край bbox на y=370 > 360), дальше дрожит: то касается, то нет
+    # A bbox edge reaches across the line, but the center stays on the same side.
+    # This must not be mistaken for a confirmed camera transition.
     path = vertical_path(640, 100, 320) + [(640, 300), (640, 305), (640, 320), (640, 300)] * 5
     events = drive(det, 7, path)
 
-    assert [e.role for e in events] == [Role.EXIT]
+    assert events == []
 
 
 def test_track_that_appears_on_the_line_gets_direction_after_moving():
