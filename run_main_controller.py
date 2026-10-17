@@ -1008,33 +1008,32 @@ def main() -> None:
                     key = (camera_id, track_id)
                     x1, y1, x2, y2 = map(int, box)
                     global_id = journey_by_track.get(key)
+                    # Show the best current Re-ID confidence above every bbox. Diagnostic
+                    # scores compare the latest appearance against all identity galleries;
+                    # matched-pair scores are the fallback for topology-gated candidates.
+                    reid_conf = runtime_reid.last_diagnostic_scores.get(key)
+                    if reid_conf is None and key in runtime_reid.last_scores:
+                        reid_conf = runtime_reid.last_scores[key][1]
+                    reid_label = f"REID {reid_conf:.2f}" if reid_conf is not None else "REID --"
+
                     if camera_id == 1:
-                        # Scan station: blue detections, green tracks inside scan zone.
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
-                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-                        if track_id in active_ids and global_id is not None:
-                            plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
-                            if plate != "UNKNOWN":
-                                draw_text_label(display, box, plate, color)
                     elif global_id is not None and global_id > 0:
-                        # Identified vehicles remain green regardless of motion.
                         color = (0, 255, 0)
-                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+                    elif movement_state.get(key, False) or (global_id is not None and global_id < 0):
+                        color = (0, 255, 255)
+                    else:
+                        color = (0, 0, 255)
+                    cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+
+                    label_parts = [f"LOCAL {track_id}", reid_label]
+                    if global_id is not None and global_id < 0:
+                        label_parts.append("SEARCHING")
+                    elif global_id is not None and global_id > 0:
                         plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
                         if plate != "UNKNOWN":
-                            draw_text_label(display, box, plate, color)
-                    elif movement_state.get(key, False) or (global_id is not None and global_id < 0):
-                        # Unidentified but actively tracked vehicles remain visible in yellow.
-                        # A negative provisional journey means the vehicle is being followed
-                        # downstream, but no registered identity/plate has been confirmed.
-                        color = (0, 255, 255)
-                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-                        provisional = f"LOCAL {track_id} | SEARCHING" if global_id is not None and global_id < 0 else f"LOCAL {track_id}"
-                        draw_text_label(display, box, provisional, color)
-                    else:
-                        # Stationary vehicles: red, no label.
-                        color = (0, 0, 255)
-                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+                            label_parts.append(plate)
+                    draw_text_label(display, box, " | ".join(label_parts), color)
 
                 # Camera 1 builds the registration gallery but has no route topology lines.
                 if camera_id != 1:
