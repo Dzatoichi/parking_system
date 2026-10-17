@@ -146,15 +146,21 @@ class RuntimeReID:
             plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
+        key = (int(camera_id), int(track_id))
         if comparisons:
             best_sim, best_journey_id, best_plate, _gallery_count = comparisons[0]
-            key = (int(camera_id), int(track_id))
             self.last_diagnostic_scores[key] = float(best_sim)
             self.last_diagnostic_matches[key] = (
                 float(best_sim), int(best_journey_id), str(best_plate)
             )
             sampled_at = frame_id if frame_id is not None else self.last_sample_frame.get(key, -1)
             self.last_diagnostic_frames[key] = int(sampled_at)
+        else:
+            # A fresh appearance observation without any usable identity gallery
+            # invalidates the old comparison; never keep an unrelated prior score.
+            self.last_diagnostic_scores.pop(key, None)
+            self.last_diagnostic_matches.pop(key, None)
+            self.last_diagnostic_frames.pop(key, None)
 
     def get_fresh_diagnostic_match(
         self,
