@@ -900,7 +900,7 @@ def main() -> None:
                                 })
                                 match_plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
-                                print(f"[MATCH] {source_camera}->{target_camera} {match_label})
+                                print(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         else:
                             reason = (
                                 "below_similarity_threshold"
