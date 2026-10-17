@@ -901,7 +901,6 @@ def main() -> None:
                     # Candidate generation is spatial/topological: a candidate must
                     # have crossed the ENTER line from this exact source camera and be
                     # inside the TTL window. Identity is decided by Re-ID, never queue order.
-                    min_margin = float(getattr(Config, "REID_MATCH_MIN_MARGIN", 0.04))
                     max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
                     scored_pairs = []
                     for pending_index, (journey_id, created_target_frame) in enumerate(pending_items):
@@ -999,24 +998,17 @@ def main() -> None:
                                 match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
                                 print(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         else:
-                            score_delta = best[0] - second_score
-                            if best[0] < runtime_reid.threshold:
-                                reason = "below_similarity_threshold"
-                                reid_candidate_status[(target_camera, int(best[2]))] = (
-                                    f"WAIT SIM {best[0]:.2f}<{runtime_reid.threshold:.2f}"
-                                )
-                            else:
-                                reason = "below_similarity_threshold"
-                                reid_candidate_status[(target_camera, int(best[2]))] = (
-                                    f"WAIT SIM {best[0]:.2f}<{runtime_reid.threshold:.2f}"
-                                )
+                            reason = "below_similarity_threshold"
+                            reid_candidate_status[(target_camera, int(best[2]))] = (
+                                f"WAIT SIM {best[0]:.2f}<{runtime_reid.threshold:.2f}"
+                            )
                             quiet_log(
                                 f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                                 f"best_journey={best[1]} best_track={best[2]} "
                                 f"decision_score={best[0]:.3f} "
                                 "score_mode=best_similarity "
                                 f"threshold={runtime_reid.threshold:.3f} "
-                                f"second_score={second_score:.3f} required_margin={min_margin:.3f} "
+                                f"second_score={second_score:.3f} "
                                 f"reason={reason}; keep searching"
                             )
                     elif pending_items and arrival_items:
@@ -1160,7 +1152,13 @@ def main() -> None:
                         label_parts.append(
                             f"MATCHED {plate}" if plate != "UNKNOWN" else f"MATCHED JOURNEY {global_id}"
                         )
-                    elif not in_scan_zone:
+                    elif False:
+                        # Placeholder removed below; diagnostics are appended independently
+                        # of whether the journey has already been assigned.
+                        pass
+                    if not in_scan_zone and (
+                        candidate_scores or candidate_status or diagnostic_match is not None
+                    ):
                         label_parts.append(reid_label)
                     draw_text_label(display, box, " | ".join(label_parts), color)
 
