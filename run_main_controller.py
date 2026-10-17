@@ -277,12 +277,8 @@ def main() -> None:
             )
         }
         print(
-            f"[REGISTRATION DATA SNAPSHOT] journey={journey_number if journey_number is not None else '-'} "
-            f"camera={camera_id} track={track_id} features={feature_count} "
-            f"local_plate_votes={sum(len(scores) for scores in local_votes.values())} "
-            f"journey_plate_votes={sum(vote_summary.values())} "
-            f"plate={plate} ocr_conf={confidence:.2f} vote_counts={vote_summary} "
-            f"note=state_at_gallery_close_not_final"
+            f"[SCAN] journey={journey_number if journey_number is not None else '-'} "
+            f"LOCAL {track_id} plate={plate} votes={sum(vote_summary.values())}"
         )
         plate_votes.pop((camera_id, int(track_id)), None)
 
@@ -594,22 +590,6 @@ def main() -> None:
                 # Diagnostic Re-ID: compare each newly accepted single-vector observation
                 # against every registered vehicle gallery and print the best cosine score.
                 # ReID is the identity decision; topology EXIT/ENTER events gate candidate generation.
-                if camera_id != 1 and sampled_embeddings:
-                    identity_labels = {
-                        int(journey_id): best_plate(votes)[0]
-                        for journey_id, votes in journey_plate_votes.items()
-                    }
-                    for sampled_track_id, vector in sampled_embeddings:
-                        sampled_key = (camera_id, int(sampled_track_id))
-                        assigned_journey = journey_by_track.get(sampled_key)
-                        if assigned_journey is not None and assigned_journey > 0:
-                            # This track already belongs to a registered journey through
-                            # the scan-zone/topology handoff. Do not compare it against
-                            # every identity gallery merely because it is on camera 2+.
-                            continue
-                        runtime_reid.log_feature_against_all_identities(
-                            camera_id, int(sampled_track_id), vector, identity_labels
-                        )
 
                 # Persist new moving-track embeddings after the scan-zone binding check.
                 if database is not None:
@@ -703,20 +683,15 @@ def main() -> None:
                             completed = sessions.finish_on_camera2_track_lost(command.track_id)
                             if completed:
                                 registration_completed = True
-                                print(
-                                    f"[REGISTRATION COMPLETE] journey={journey_number} "
-                                    f"camera=2 track={command.track_id}"
-                                )
-                            else:
-                                print(
-                                    f"[SEARCH START] journey={journey_number} "
-                                    f"camera=2 track={command.track_id} next_camera={command.camera_id}"
-                                )
-                        else:
-                            print(
-                                f"[HANDOFF TASK] journey={journey_number} "
-                                f"{command.source_camera}->{command.camera_id}"
-                            )
+                        label_plate, _ = best_plate(journey_plate_votes.get(int(journey_number), {}))
+                        transition_label = (
+                            label_plate if label_plate != "UNKNOWN"
+                            else f"LOCAL {int(command.track_id)}"
+                        )
+                        print(
+                            f"[TRANSITION] {command.source_camera}->{command.camera_id} "
+                            f"{transition_label}"
+                        )
                         # Target stream is already active; never start/seek it on a handoff.
 
                     elif command.type is CommandType.MARK_ARRIVED:
