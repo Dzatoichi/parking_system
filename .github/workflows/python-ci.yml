@@ -2,9 +2,9 @@ name: Python controller checks
 
 on:
   push:
-    branches: [feature-candidate-search-v1]
+    branches: [feature-candidate-search-v1, reid_and_tracking]
   pull_request:
-    branches: [feature-candidate-search-v1]
+    branches: [reid_and_tracking, feature-candidate-search-v1]
   workflow_dispatch:
 
 jobs:
