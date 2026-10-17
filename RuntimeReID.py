@@ -120,6 +120,7 @@ class RuntimeReID:
         query = self._valid(query_feature)
         if query is None:
             return
+        key = (int(camera_id), int(track_id))
         comparisons = []
         for journey_id, gallery in self.identity_gallery.items():
             if not gallery:
@@ -129,7 +130,6 @@ class RuntimeReID:
             plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
-        key = (int(camera_id), int(track_id))
         if comparisons:
             best_sim, best_journey_id, best_plate, _gallery_count = comparisons[0]
             self.last_diagnostic_scores[key] = float(best_sim)
