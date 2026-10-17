@@ -523,13 +523,20 @@ def main() -> None:
                         if target_camera == camera_id and pending_reid.get((_source_camera, target_camera))
                         for track_id, _arrival_frame in candidates
                     }
-                    for candidate_track_id in sorted(eligible_track_ids):
-                        query = runtime_reid.last_query_features.get((camera_id, candidate_track_id))
+                    # Diagnostic overlay must not depend on a topology ENTER event.
+                    # Topology still gates assignment below, but without this independent
+                    # display pass every ordinary track says "NO REID SCORE" until it
+                    # becomes an eligible handoff candidate.
+                    for candidate_track_id, _candidate_bbox in reid_tracks:
+                        query = runtime_reid.last_query_features.get((camera_id, int(candidate_track_id)))
                         if query is None:
                             continue
                         runtime_reid.log_feature_against_all_identities(
-                            camera_id, candidate_track_id, query, identity_labels,
-                            frame_id=frame_id, journey_ids=active_task_journeys,
+                            camera_id, int(candidate_track_id), query, identity_labels,
+                            frame_id=frame_id,
+                            # Diagnostics show the best known gallery; assignment remains
+                            # restricted to pending journeys + topology-arrived candidates.
+                            journey_ids=None,
                         )
 
                 # Use the current registration-zone logic from run_feature_capture:
