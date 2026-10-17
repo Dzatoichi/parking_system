@@ -258,8 +258,13 @@ def main() -> None:
 
         local_votes = plate_votes.get((camera_id, int(track_id)), {})
         if journey_number is not None:
-            for text, scores in local_votes.items():
-                journey_plate_votes[int(journey_number)][text].extend(scores)
+            # OCR camera 1 adds each accepted reading to journey_plate_votes immediately.
+            # Do not merge its local votes again at gallery close, or the same readings
+            # are counted twice. Keep this merge only for a future OCR-enabled camera
+            # whose readings are not already propagated in the live OCR path.
+            if camera_id not in OCR_CAMERAS:
+                for text, scores in local_votes.items():
+                    journey_plate_votes[int(journey_number)][text].extend(scores)
             plate, confidence = best_plate(journey_plate_votes[int(journey_number)])
         else:
             plate, confidence = best_plate(local_votes)
