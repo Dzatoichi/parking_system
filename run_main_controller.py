@@ -1152,10 +1152,6 @@ def main() -> None:
                         label_parts.append(
                             f"MATCHED {plate}" if plate != "UNKNOWN" else f"MATCHED JOURNEY {global_id}"
                         )
-                    elif False:
-                        # Placeholder removed below; diagnostics are appended independently
-                        # of whether the journey has already been assigned.
-                        pass
                     if not in_scan_zone and (
                         candidate_scores or candidate_status or diagnostic_match is not None
                     ):
