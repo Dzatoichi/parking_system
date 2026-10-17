@@ -997,19 +997,15 @@ def main() -> None:
                         reverse=True,
                     )
                     if candidate_scores:
-                        visible_scores = []
-                        for score, candidate_journey, candidate_plate in candidate_scores[:3]:
-                            candidate_name = (
-                                candidate_plate if candidate_plate and candidate_plate != "UNKNOWN"
-                                else f"J{candidate_journey}"
-                            )
-                            visible_scores.append(f"{candidate_name}:{score:.2f}")
-                        extra = len(candidate_scores) - len(visible_scores)
-                        if extra > 0:
-                            visible_scores.append(f"+{extra}")
-                        reid_label = "REID " + " ".join(visible_scores)
+                        best_score, best_journey, best_plate_label = candidate_scores[0]
+                        best_name = (
+                            best_plate_label
+                            if best_plate_label and best_plate_label != "UNKNOWN"
+                            else f"J{best_journey}"
+                        )
+                        reid_label = f"BEST SIM {best_score:.2f} {best_name}"
                     else:
-                        reid_label = "REID --"
+                        reid_label = "BEST SIM --"
 
                     if camera_id == 1:
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
