@@ -944,6 +944,14 @@ def main() -> None:
                                     reid_candidate_status.setdefault(
                                         (target_camera, int(candidate_id)), "WAIT GALLERY"
                                     )
+                                    plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
+                                    print(
+                                        f"[REID COMPARE] camera={target_camera} frame={frame_id} "
+                                        f"track={candidate_id} route={source_camera}->{target_camera} "
+                                        f"journey={journey_id} plate={plate} result=WAIT "
+                                        f"reason=empty_identity_gallery gallery_features=0 "
+                                        f"query={'yes' if runtime_reid.last_query_features.get((target_camera, int(candidate_id))) is not None else 'no'}"
+                                    )
                             continue
                         for arrival_index, (candidate_id, arrival_frame) in enumerate(arrival_items):
                             # Do not steal a track that crossed the target ENTER line
@@ -966,19 +974,52 @@ def main() -> None:
                                     f"reason=no_current_frame_embedding gallery_features={len(identity_features)}"
                                 )
                                 continue
+                            query_dim = int(np.asarray(query_feature).size)
+                            gallery_dims = sorted({
+                                int(np.asarray(vector).size) for vector in identity_features
+                            })
+                            if gallery_dims != [query_dim]:
+                                reid_candidate_status[key] = "WAIT FEATURE DIM MISMATCH"
+                                print(
+                                    f"[REID COMPARE] camera={target_camera} frame={frame_id} "
+                                    f"track={candidate_id} route={source_camera}->{target_camera} "
+                                    f"journey={journey_id} result=WAIT reason=embedding_dimension_mismatch "
+                                    f"query_dim={query_dim} gallery_dims={gallery_dims} "
+                                    f"gallery_features={len(identity_features)}"
+                                )
+                                continue
                             decision_score = RuntimeReID._best_similarity(
                                 [query_feature], identity_features
                             )
-                            if decision_score >= 0.0:
-                                scored_pairs.append((
-                                    float(decision_score), int(journey_id), int(candidate_id),
-                                    int(arrival_frame), pending_index, arrival_index
-                                ))
-                                reid_candidate_status[key] = "SCORED"
-                                plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
-                                reid_candidate_scores[(target_camera, int(candidate_id))].append(
-                                    (float(decision_score), int(journey_id), plate)
-                                )
+                            scored_pairs.append((
+                                float(decision_score), int(journey_id), int(candidate_id),
+                                int(arrival_frame), pending_index, arrival_index
+                            ))
+                            reid_candidate_status[key] = "SCORED"
+                            plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
+                            reid_candidate_scores[(target_camera, int(candidate_id))].append(
+                                (float(decision_score), int(journey_id), plate)
+                            )
+                            overlay_key = (target_camera, int(candidate_id))
+                            previous_overlay = reid_overlay_state.get(overlay_key, {})
+                            previous_frame = int(previous_overlay.get("frame_id", -1))
+                            if frame_id >= previous_frame:
+                                reid_overlay_state[overlay_key] = {
+                                    "score": float(decision_score),
+                                    "journey_id": int(journey_id),
+                                    "plate": plate,
+                                    "frame_id": int(frame_id),
+                                    "source_camera": int(source_camera),
+                                    "status": "PENDING",
+                                }
+                            print(
+                                f"[REID COMPARE] camera={target_camera} frame={frame_id} "
+                                f"track={candidate_id} route={source_camera}->{target_camera} "
+                                f"journey={journey_id} plate={plate} sim={decision_score:.4f} "
+                                f"threshold={runtime_reid.threshold:.4f} "
+                                f"query_dim={query_dim} gallery_features={len(identity_features)} "
+                                f"result={'MATCH_THRESHOLD' if decision_score >= runtime_reid.threshold else 'BELOW_THRESHOLD'}"
+                            )
                                 overlay_key = (target_camera, int(candidate_id))
                                 previous_overlay = reid_overlay_state.get(overlay_key, {})
                                 previous_frame = int(previous_overlay.get("frame_id", -1))
@@ -1136,6 +1177,9 @@ def main() -> None:
                     registered_tracks.discard(stale_key)
                     plate_votes.pop(stale_key, None)
                     runtime_reid.forget_track(camera_id, stale_track_id)
+                    reid_overlay_state.pop(stale_key, None)
+                    reid_candidate_scores.pop(stale_key, None)
+                    reid_candidate_status.pop(stale_key, None)
                     camera2_feature_closed_tracks.discard(stale_key)
                     camera2_interior_seen.discard(stale_key)
                     scan_zone_first_seen.pop(stale_key, None)
@@ -1167,6 +1211,27 @@ def main() -> None:
                         camera_id in FEATURE_CAMERAS
                         and feature_managers[camera_id].is_in_zone(camera_id, box)
                     )
+                    # Once assigned, keep BEST SIM visible by comparing the current
+                    # frame with that journey's gallery. This is display-only; it cannot
+                    # change or revoke the already established journey binding.
+                    if global_id is not None:
+                        assigned_gallery = runtime_reid.identity_gallery.get(int(global_id), [])
+                        current_query = runtime_reid.last_query_features.get(key)
+                        if assigned_gallery and current_query is not None:
+                            assigned_score = RuntimeReID._best_similarity(
+                                [current_query], assigned_gallery
+                            )
+                            assigned_plate, _ = best_plate(
+                                journey_plate_votes.get(int(global_id), {})
+                            )
+                            reid_overlay_state[key] = {
+                                "score": float(assigned_score),
+                                "journey_id": int(global_id),
+                                "plate": assigned_plate,
+                                "frame_id": int(frame_id),
+                                "source_camera": None,
+                                "status": "IDENTIFIED",
+                            }
                     diagnostic_match = runtime_reid.get_fresh_diagnostic_match(
                         camera_id, track_id, frame_id,
                         max_age_frames=max(1, runtime_reid.sample_every),
@@ -1177,6 +1242,7 @@ def main() -> None:
                         reverse=True,
                     )
                     candidate_status = reid_candidate_status.get(key)
+                    overlay_state = reid_overlay_state.get(key)
                     if candidate_scores:
                         best_score, best_journey, best_plate_label = candidate_scores[0]
                         best_name = (
@@ -1190,6 +1256,23 @@ def main() -> None:
                             if candidate_status and candidate_status not in {"WAITING", "SCORED"}
                             else "PENDING"
                         )
+                        reid_label = f"BEST SIM {best_score:.2f} {best_name} | {suffix}"
+                    elif overlay_state is not None and (
+                        global_id is not None or frame_id - int(overlay_state.get("frame_id", -1)) <= 30
+                    ):
+                        best_score = float(overlay_state["score"])
+                        best_journey = int(overlay_state["journey_id"])
+                        best_plate_label = str(overlay_state.get("plate", "UNKNOWN"))
+                        best_name = (
+                            best_plate_label
+                            if best_plate_label and best_plate_label != "UNKNOWN"
+                            else f"J{best_journey}"
+                        )
+                        if global_id is not None:
+                            suffix = "IDENTIFIED"
+                        else:
+                            age = max(0, frame_id - int(overlay_state.get("frame_id", frame_id)))
+                            suffix = f"LAST {age}f" if age else "PENDING"
                         reid_label = f"BEST SIM {best_score:.2f} {best_name} | {suffix}"
                     elif candidate_status and candidate_status not in {"WAITING", "SCORED"}:
                         reid_label = f"REID {candidate_status}"
@@ -1225,7 +1308,8 @@ def main() -> None:
                             f"MATCHED {plate}" if plate != "UNKNOWN" else f"MATCHED JOURNEY {global_id}"
                         )
                     if not in_scan_zone and (
-                        candidate_scores or candidate_status or diagnostic_match is not None
+                        candidate_scores or candidate_status or overlay_state is not None
+                        or diagnostic_match is not None
                     ):
                         label_parts.append(reid_label)
                     draw_text_label(display, box, " | ".join(label_parts), color)
