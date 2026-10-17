@@ -50,8 +50,8 @@ class _LogTee:
         written = self.stream.write(text)
         self.stream.flush()
         self._buffer += text
-        while "\\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\\n", 1)
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
             if line.strip():
                 LOG.log(self.level, line.rstrip())
         return written
