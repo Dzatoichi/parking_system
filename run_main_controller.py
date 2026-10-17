@@ -143,8 +143,10 @@ def main() -> None:
     # Pending journeys and topology-arrived candidates, matched by ReID within each directed camera barrier.
     pending_reid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     arrived_candidates: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    # Per-frame scores against every journey currently pending for this target camera.
+    # Scores and wait reasons for topology-eligible ReID handoffs only.
     reid_candidate_scores: dict[tuple[int, int], list[tuple[float, int, str]]] = defaultdict(list)
+    reid_candidate_status: dict[tuple[int, int], str] = {}
+    scan_exclusion_logged: set[tuple[int, int]] = set()
     registered_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -420,6 +422,31 @@ def main() -> None:
                     for (source_cam, target_cam), candidates in arrived_candidates.items():
                         if target_cam == camera_id and pending_reid.get((source_cam, target_cam)):
                             reid_track_ids.update(int(tid) for tid, _arrival_frame in candidates)
+                    # Scan galleries and the general ReID candidate pool are separate.
+                    # Exclude only exact local tracks owned by an active scan session;
+                    # unrelated vehicles on cameras 2/3 remain eligible for ReID.
+                    active_scan_track_keys = (
+                        sessions.active_track_keys() if camera_id in (2, 3) else set()
+                    )
+                    active_scan_track_ids = {
+                        track_id for cam, track_id in active_scan_track_keys
+                        if cam == camera_id
+                    }
+                    for logged_key in list(scan_exclusion_logged):
+                        if logged_key[0] == camera_id and logged_key not in active_scan_track_keys:
+                            scan_exclusion_logged.discard(logged_key)
+                    for scan_track_id in sorted(active_scan_track_ids):
+                        scan_key = (camera_id, scan_track_id)
+                        # Purge embeddings collected before the track was bound to scan.
+                        runtime_reid.forget_track(camera_id, scan_track_id)
+                        if scan_track_id in reid_track_ids and scan_key not in scan_exclusion_logged:
+                            print(
+                                f"[REID SCAN EXCLUDED] camera={camera_id} track={scan_track_id} "
+                                "reason=active_scan_session"
+                            )
+                            scan_exclusion_logged.add(scan_key)
+                    reid_track_ids.difference_update(active_scan_track_ids)
+
                     reid_tracks = [
                         (int(tid), bbox) for tid, bbox in tracks
                         if int(tid) in reid_track_ids
@@ -532,6 +559,9 @@ def main() -> None:
                                 sessions.bind_track(session_id, 2, scan_track_id)
                             except (KeyError, ValueError) as exc:
                                 print(f"[SCAN FIFO WARNING] {exc}")
+                            runtime_reid.forget_track(2, scan_track_id)
+                            reid_candidate_scores.pop((2, scan_track_id), None)
+                            reid_candidate_status.pop((2, scan_track_id), None)
                             if database is not None:
                                 database.record_event(
                                     2, scan_track_id, frame_id, "scan_zone_fifo_bind",
@@ -754,6 +784,8 @@ def main() -> None:
                 # waiting for this camera, not the best match against the entire gallery.
                 for score_key in [item for item in reid_candidate_scores if item[0] == camera_id]:
                     reid_candidate_scores.pop(score_key, None)
+                for status_key in [item for item in reid_candidate_status if item[0] == camera_id]:
+                    reid_candidate_status.pop(status_key, None)
 
                 # Resolve each directed barrier independently using topology-gated ReID scores.
                 # Low-confidence or ambiguous matches stay unresolved; never fall back to FIFO.
@@ -794,9 +826,16 @@ def main() -> None:
                         if frame_id - item[1] <= ttl
                         and (target_camera, item[0]) not in journey_by_track
                     ]
+                    for candidate_id, _arrival_frame in arrival_items:
+                        reid_candidate_status.setdefault(
+                            (target_camera, int(candidate_id)), "WAITING"
+                        )
                     # Camera 3 remains FIFO for now, as requested. Topology ENTER
                     # events define the eligible target tracks; queue order decides identity.
                     if target_camera == 3:
+                        # This handoff is intentionally FIFO, not ReID-scored.
+                        for candidate_id, _arrival_frame in arrival_items:
+                            reid_candidate_status[(target_camera, int(candidate_id))] = "FIFO PENDING"
                         max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
                         arrival_items.sort(key=lambda item: (item[1], item[0]))
                         while pending_items and arrival_items:
@@ -819,6 +858,10 @@ def main() -> None:
                                 if current and current["status"] == "active":
                                     try:
                                         sessions.bind_track(session_id, target_camera, candidate_id)
+                                        if target_camera in (2, 3):
+                                            runtime_reid.forget_track(target_camera, candidate_id)
+                                            reid_candidate_scores.pop((target_camera, candidate_id), None)
+                                            reid_candidate_status.pop((target_camera, candidate_id), None)
                                     except (KeyError, ValueError) as exc:
                                         print(f"[SESSION BIND WARNING] {exc}")
                             if database is not None and journey_id > 0:
@@ -845,7 +888,16 @@ def main() -> None:
                     max_early_frames = max(0, int(getattr(Config, "REID_MATCH_MAX_EARLY_FRAMES", 0)))
                     scored_pairs = []
                     for pending_index, (journey_id, created_target_frame) in enumerate(pending_items):
-                        if journey_id == 0 or not runtime_reid.identity_gallery.get(int(journey_id)):
+                        identity_features = runtime_reid.identity_gallery.get(int(journey_id), [])
+                        if journey_id == 0 or not identity_features:
+                            for candidate_id, arrival_frame in arrival_items:
+                                if (
+                                    arrival_frame >= created_target_frame - max_early_frames
+                                    and (target_camera, int(candidate_id)) not in journey_by_track
+                                ):
+                                    reid_candidate_status.setdefault(
+                                        (target_camera, int(candidate_id)), "WAIT GALLERY"
+                                    )
                             continue
                         for arrival_index, (candidate_id, arrival_frame) in enumerate(arrival_items):
                             # Do not steal a track that crossed the target ENTER line
@@ -855,16 +907,18 @@ def main() -> None:
                             key = (target_camera, int(candidate_id))
                             if key in journey_by_track:
                                 continue
+                            track_features = runtime_reid.track_features.get(key, [])
+                            if len(track_features) < runtime_reid.min_samples:
+                                reid_candidate_status.setdefault(
+                                    key, f"WAIT FEATURES {len(track_features)}/{runtime_reid.min_samples}"
+                                )
+                                continue
                             # Keep the diagnostic log, but rank every viable pair by its
                             # raw appearance score, including scores below the acceptance
                             # threshold, so the runner-up is not silently ignored.
                             runtime_reid.match_track_to_journey(
                                 target_camera, int(candidate_id), int(journey_id)
                             )
-                            track_features = runtime_reid.track_features.get(key, [])
-                            identity_features = runtime_reid.identity_gallery.get(int(journey_id), [])
-                            if len(track_features) < runtime_reid.min_samples or not identity_features:
-                                continue
                             raw_score, _mean_topk = RuntimeReID._similarity_scores(
                                 track_features[-1:], identity_features
                             )
@@ -873,6 +927,7 @@ def main() -> None:
                                     float(raw_score), int(journey_id), int(candidate_id),
                                     int(arrival_frame), pending_index, arrival_index
                                 ))
+                                reid_candidate_status[key] = "SCORED"
                                 plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 reid_candidate_scores[(target_camera, int(candidate_id))].append(
                                     (float(raw_score), int(journey_id), plate)
@@ -891,6 +946,7 @@ def main() -> None:
                                 pending_items.pop(pending_index)
                                 arrival_items.pop(arrival_index)
                                 journey_by_track[key] = journey_id
+                                reid_candidate_status.pop(key, None)
                                 if database is not None and journey_id > 0 and target_camera not in GALLERY_CAMERAS:
                                     for vector in runtime_reid.track_features.get(key, []):
                                         database.save_embedding(journey_id, target_camera, candidate_id, frame_id, vector)
@@ -900,6 +956,10 @@ def main() -> None:
                                     if current and current["status"] == "active":
                                         try:
                                             sessions.bind_track(session_id, target_camera, candidate_id)
+                                            if target_camera in (2, 3):
+                                                runtime_reid.forget_track(target_camera, candidate_id)
+                                                reid_candidate_scores.pop((target_camera, candidate_id), None)
+                                                reid_candidate_status.pop((target_camera, candidate_id), None)
                                         except (KeyError, ValueError) as exc:
                                             print(f"[SESSION BIND WARNING] {exc}")
                                 if database is not None and journey_id > 0:
@@ -928,11 +988,17 @@ def main() -> None:
                                 match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
                                 print(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         else:
-                            reason = (
-                                "below_similarity_threshold"
-                                if best[0] < runtime_reid.threshold
-                                else "ambiguous_score_margin"
-                            )
+                            score_delta = best[0] - second_score
+                            if best[0] < runtime_reid.threshold:
+                                reason = "below_similarity_threshold"
+                                reid_candidate_status[(target_camera, int(best[2]))] = (
+                                    f"WAIT SIM {best[0]:.2f}<{runtime_reid.threshold:.2f}"
+                                )
+                            else:
+                                reason = "ambiguous_score_margin"
+                                reid_candidate_status[(target_camera, int(best[2]))] = (
+                                    f"AMBIGUOUS Δ{score_delta:.2f}<{min_margin:.2f}"
+                                )
                             quiet_log(
                                 f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                                 f"best_journey={best[1]} best_track={best[2]} "
@@ -1031,44 +1097,55 @@ def main() -> None:
                         key=lambda item: item[0],
                         reverse=True,
                     )
-                    if diagnostic_match is not None:
-                        best_score, best_journey, best_plate_label = diagnostic_match
-                        best_name = (
-                            best_plate_label
-                            if best_plate_label and best_plate_label != "UNKNOWN"
-                            else f"J{best_journey}"
-                        )
-                        reid_label = f"{best_score:.2f} {best_name}"
-                    elif candidate_scores:
+                    candidate_status = reid_candidate_status.get(key)
+                    if candidate_scores:
                         best_score, best_journey, best_plate_label = candidate_scores[0]
                         best_name = (
                             best_plate_label
                             if best_plate_label and best_plate_label != "UNKNOWN"
                             else f"J{best_journey}"
                         )
-                        reid_label = f"{best_score:.2f} {best_name}"
+                        suffix = (
+                            candidate_status
+                            if candidate_status and candidate_status not in {"WAITING", "SCORED"}
+                            else "PENDING"
+                        )
+                        reid_label = f"HANDOFF SIM {best_score:.2f} {best_name} | {suffix}"
+                    elif candidate_status and candidate_status not in {"WAITING", "SCORED"}:
+                        reid_label = f"REID {candidate_status}"
+                    elif diagnostic_match is not None:
+                        best_score, best_journey, best_plate_label = diagnostic_match
+                        best_name = (
+                            best_plate_label
+                            if best_plate_label and best_plate_label != "UNKNOWN"
+                            else f"J{best_journey}"
+                        )
+                        reid_label = f"BEST SIM {best_score:.2f} {best_name} | DIAG ONLY"
                     else:
-                        reid_label = "--"
+                        reid_label = "NO REID SCORE"
 
                     if camera_id == 1:
                         color = (0, 255, 0) if track_id in active_ids else (255, 0, 0)
-                    elif global_id is not None and global_id > 0:
+                    elif global_id is not None:
+                        # Green means the journey association is confirmed, even if
+                        # its plate is not known yet. Diagnostic similarity alone is not enough.
                         color = (0, 255, 0)
-                    elif movement_state.get(key, False) or (global_id is not None and global_id < 0):
+                    elif movement_state.get(key, False):
                         color = (0, 255, 255)
                     else:
                         color = (0, 0, 255)
                     cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
 
                     label_parts = [f"LOCAL {track_id}"]
-                    if not in_scan_zone:
-                        label_parts.append(reid_label)
                     if global_id is not None and global_id < 0:
-                        label_parts.append("SEARCHING")
+                        label_parts.append(f"MATCHED JOURNEY {global_id} (NO PLATE)")
                     elif global_id is not None and global_id > 0:
                         plate, _ = best_plate(journey_plate_votes.get(global_id, {}))
-                        if plate != "UNKNOWN":
-                            label_parts.append(plate)
+                        label_parts.append(
+                            f"MATCHED {plate}" if plate != "UNKNOWN" else f"MATCHED JOURNEY {global_id}"
+                        )
+                    elif not in_scan_zone:
+                        label_parts.append(reid_label)
                     draw_text_label(display, box, " | ".join(label_parts), color)
 
                 # Camera 1 builds the registration gallery but has no route topology lines.

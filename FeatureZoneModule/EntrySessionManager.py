@@ -172,6 +172,16 @@ class EntrySessionManager:
         with self._lock:
             return [session.as_dict() for session in self._sessions if session.status == "active"]
 
+    def active_track_keys(self) -> set[tuple[int, int]]:
+        """Return exact camera-local track keys owned by active sessions only."""
+        with self._lock:
+            return {
+                (int(camera_id), int(track_id))
+                for session in self._sessions
+                if session.status == "active"
+                for camera_id, track_id in session.camera_tracks.items()
+            }
+
     def _require_session(self, session_id: str) -> EntrySession:
         session = self._by_id.get(str(session_id))
         if session is None:
