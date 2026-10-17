@@ -109,7 +109,7 @@ def main() -> None:
     runtime_reid = RuntimeReID(
         features,
         threshold=Config.REID_SIMILARITY_THRESHOLD,
-        sample_every=1
+        sample_every=1,
         min_samples=max(2, int(getattr(Config, "RUNTIME_REID_MIN_SAMPLES", 2))),
     )
     plate_ocr = PlateOCRTracker(
