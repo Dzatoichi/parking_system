@@ -124,12 +124,6 @@ class RuntimeReID:
         comparisons.sort(key=lambda item: item[0], reverse=True)
         if comparisons:
             self.last_diagnostic_scores[(int(camera_id), int(track_id))] = float(comparisons[0][0])
-        for best_sim, journey_id, plate, gallery_count in comparisons:
-            print(
-                f"[REID COMPARE] camera={int(camera_id)} local_id={int(track_id)} "
-                f"vs_plate={plate} journey={journey_id} best_sim={best_sim:.3f} "
-                f"gallery_vectors={gallery_count}"
-            )
 
     def match_track_to_journey(self, camera_id: int, track_id: int, journey_id: int):
         camera_id, track_id, journey_id = int(camera_id), int(track_id), int(journey_id)
@@ -165,13 +159,6 @@ class RuntimeReID:
             round(float(mean_topk_score), 3), result
         )
         if self._last_match_log_state.get(log_key) != state:
-            print(
-                f"[REID SIM] camera={camera_id} track={track_id} journey={journey_id} "
-                f"best_sim={best_score:.3f} mean_topk_sim={mean_topk_score:.3f} "
-                f"threshold={self.threshold:.3f} "
-                f"track_features={len(track_features)} journey_features={len(gallery)} "
-                f"result={result}"
-            )
             self._last_match_log_state[log_key] = state
         return score if score >= self.threshold else None
 
