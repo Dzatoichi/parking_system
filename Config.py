@@ -21,18 +21,18 @@ class Config:
     DEVICE: str = "cpu"
 
     # Local video files / RTSP URLs for cameras 1-9.
-    # Set unused sources to "". Feature capture currently processes only cameras 1-3;
-    # cameras 4-9 are configured here for the wider tracking pipeline, not Re-ID capture.
+    # Set unused sources to "". Scan/gallery capture runs on cameras 1-3;
+    # general RuntimeReID matching uses cameras 2-9. These are separate pipelines.
     CAMERA_VIDEO_PATHS = {
         1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/one-time/vezd.mov"),
         2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/one-time/sboku.mov"),
         3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/szadi.mov"),
-        4: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5007.mov"),
-        5: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5005_vniz.mov"),
-        6: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5005_vverh.mov"),
-        7: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5003_vniz.mov"),
-        8: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5003_vverh.mov"),
-        9: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/5009.mov"),
+        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/one-time/5007.mov"),
+        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/one-time/5005_vniz.mov"),
+        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/one-time/5005_vverh.mov"),
+        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/one-time/5003_vniz.mov"),
+        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/one-time/5003_vverh.mov"),
+        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/one-time/5009.mov"),
 
         # 1: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam1.ts"),
         # 2: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam2.ts"),
