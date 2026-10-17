@@ -16,9 +16,8 @@ class Matcher:
     """Batch Re-ID matcher.
 
     Gallery embeddings are normalized once per matching call. Similarities are
-    computed with matrix multiplication in bounded tracklet chunks; identity
-    scores aggregate the best few cross-view comparisons instead of trusting a
-    single lucky pair.
+    computed with matrix multiplication in bounded tracklet chunks. For now,
+    the match score is the maximum pairwise cosine similarity.
     """
 
     def __init__(
@@ -64,18 +63,11 @@ class Matcher:
         return np.divide(matrix, np.maximum(norms, 1e-12), out=np.zeros_like(matrix), where=norms > 1e-12)
 
     @staticmethod
-    def _aggregate(similarities: np.ndarray) -> float:
-        """Aggregate pairwise cosine scores for one vehicle/tracklet pair."""
+    def _best_similarity(similarities: np.ndarray) -> float:
+        """Return the strongest pairwise cosine similarity."""
         flat = np.asarray(similarities, dtype=np.float32).ravel()
         if flat.size == 0:
             return -1.0
-        if Config.MATCH_SIM_AGGREGATION == "topk_mean":
-            k = min(max(1, int(Config.MATCH_SIM_TOPK)), flat.size)
-            # partition avoids sorting the full matrix when galleries are large
-            return float(np.partition(flat, flat.size - k)[-k:].mean())
-        if Config.MATCH_SIM_AGGREGATION == "mean":
-            return float(flat.mean())
-        # Kept as an explicit compatibility mode, but not the production default.
         return float(flat.max())
 
     @classmethod
@@ -92,7 +84,7 @@ class Matcher:
                 track_matrix.shape[1], vehicle_matrix.shape[1],
             )
             return -1.0
-        return cls._aggregate(track_matrix @ vehicle_matrix.T)
+        return cls._best_similarity(track_matrix @ vehicle_matrix.T)
 
     def matching_unmatched_tracklets(self, track_ids: Optional[Iterable] = None) -> None:
         tracklets = self._scope(TrackletState.MOVE_UNMATCHED, track_ids)
@@ -246,7 +238,7 @@ class Matcher:
                 for local_idx, (tracklet, _) in enumerate(track_chunk):
                     rows = np.flatnonzero(row_owner == local_idx)
                     for vehicle_id, (column_start, column_end) in gallery_slices.items():
-                        score = self._aggregate(
+                        score = self._best_similarity(
                             similarities[np.ix_(rows, np.arange(column_start, column_end))]
                         )
                         logger.debug(

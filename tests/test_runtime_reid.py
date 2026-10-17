@@ -31,7 +31,7 @@ class RuntimeReIDTests(unittest.TestCase):
         ]
         self.assertIsNone(self.reid.match_track_to_journey(4, 12, 7))
 
-    def test_topk_mean_controls_acceptance_instead_of_one_best_pair(self):
+    def test_best_similarity_controls_acceptance(self):
         self.reid.add_identity_gallery(7, {
             "original": [
                 np.array([1.0, 0.0]),
@@ -46,9 +46,10 @@ class RuntimeReIDTests(unittest.TestCase):
             np.array([1.0, 0.0]),
         ]
 
-        # BEST SIM is 1.0, but the top-5 mean is only 0.84, below threshold.
-        self.assertIsNone(self.reid.match_track_to_journey(4, 12, 7))
-        self.assertAlmostEqual(self.reid.last_scores[(4, 12)][1], 0.84, places=5)
+        # The best pair scores 1.0 and is accepted; lower-scoring gallery views
+        # do not dilute the score because top-k aggregation is not used.
+        self.assertAlmostEqual(self.reid.match_track_to_journey(4, 12, 7), 1.0)
+        self.assertAlmostEqual(self.reid.last_scores[(4, 12)][1], 1.0, places=5)
 
     def test_diagnostic_matches_expire_after_their_frame_age(self):
         self.reid.add_identity_gallery(7, {"original": [np.array([1.0, 0.0])]})

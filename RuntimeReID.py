@@ -90,36 +90,18 @@ class RuntimeReID:
         return accepted
 
     @staticmethod
-    def _similarity_scores(track_features, identity_features) -> tuple[float, float]:
-        """Return (best pairwise cosine similarity, mean of top-k similarities)."""
+    def _best_similarity(track_features, identity_features) -> float:
+        """Return the maximum pairwise cosine similarity across the two galleries."""
         if not track_features or not identity_features:
-            return -1.0, -1.0
+            return -1.0
         a = np.asarray(track_features, dtype=np.float32)
         b = np.asarray(identity_features, dtype=np.float32)
         if a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[1]:
-            return -1.0, -1.0
-        flat = (a @ b.T).reshape(-1)
-        best = float(np.max(flat))
-        k = min(max(1, int(getattr(Config, "MATCH_SIM_TOPK", 5))), flat.size)
-        mean_topk = float(np.partition(flat, flat.size - k)[-k:].mean())
-        return best, mean_topk
-
-    @staticmethod
-    def _aggregate_similarity_score(best_score: float, mean_topk_score: float) -> float:
-        """Select the identity-decision score configured in Config.py.
-
-        BEST SIM remains a diagnostic maximum; acceptance and ranking use the
-        configured aggregation so one unusually high pair cannot decide identity.
-        """
-        aggregation = str(getattr(Config, "MATCH_SIM_AGGREGATION", "best")).strip().lower()
-        if aggregation == "topk_mean":
-            return float(mean_topk_score)
-        if aggregation == "best":
-            return float(best_score)
-        raise ValueError(
-            f"Unsupported MATCH_SIM_AGGREGATION={aggregation!r}; "
-            "expected 'topk_mean' or 'best'"
-        )
+            return -1.0
+        similarities = (a @ b.T).reshape(-1)
+        if similarities.size == 0:
+            return -1.0
+        return float(np.max(similarities))
 
     def log_feature_against_all_identities(
         self,
@@ -142,7 +124,7 @@ class RuntimeReID:
         for journey_id, gallery in self.identity_gallery.items():
             if not gallery:
                 continue
-            best_sim, _ = self._similarity_scores([query], gallery)
+            best_sim = self._best_similarity([query], gallery)
             plate = str(identity_labels.get(int(journey_id), "UNKNOWN"))
             comparisons.append((best_sim, int(journey_id), plate, len(gallery)))
         comparisons.sort(key=lambda item: item[0], reverse=True)
@@ -203,16 +185,12 @@ class RuntimeReID:
         # gallery embedding. Do not let an old target-frame embedding keep the
         # displayed score artificially unchanged as the vehicle changes view.
         query_feature = track_features[-1:]
-        best_score, mean_topk_score = self._similarity_scores(query_feature, gallery)
-        score = self._aggregate_similarity_score(best_score, mean_topk_score)
+        score = self._best_similarity(query_feature, gallery)
         self.last_scores[(camera_id, track_id)] = (journey_id, score)
         result = "ACCEPT" if score >= self.threshold else "REJECT"
         # Feature counts change only when a new appearance sample is accepted, so
         # this prints useful score updates without flooding the log every frame.
-        state = (
-            len(track_features), len(gallery), round(float(best_score), 3),
-            round(float(mean_topk_score), 3), result
-        )
+        state = (len(track_features), len(gallery), round(float(score), 3), result)
         if self._last_match_log_state.get(log_key) != state:
             self._last_match_log_state[log_key] = state
         return score if score >= self.threshold else None

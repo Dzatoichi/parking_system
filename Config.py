@@ -117,9 +117,8 @@ class Config:
     # Порог принятия совпадения между камерами. Его можно снижать независимо
     # от порога отбора разнообразных образцов в галерею.
     REID_SIMILARITY_THRESHOLD = float(os.getenv("PARKING_REID_SIMILARITY_THRESHOLD", "0.65"))
-    # Оценка по среднему K лучших пар, чтобы не полагаться на один случайный пик.
-    MATCH_SIM_AGGREGATION = "topk_mean"
-    MATCH_SIM_TOPK = 5
+    # Пока что score идентификации — максимальная cosine similarity среди пар embeddings.
+    # Top-k/mean aggregation временно не используется.
     # Число tracklet'ов в одном матричном батче Matcher (ограничивает память).
     MATCH_TRACKLET_BATCH_SIZE = 32
     MATCH_VEHICLE_BATCH_SIZE = 32

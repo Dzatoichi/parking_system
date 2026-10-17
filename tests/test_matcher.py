@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from Config import Config
 from FeaturesModule.FeaturesManager import FeaturesManager
@@ -129,20 +128,17 @@ def test_candidate_outside_scope_is_not_touched():
     assert tracklet.match_count_by_vehicle_id == {1: 1}
 
 
-# --- B8: настраиваемая агрегация сходства ------------------------------------
+# --- B8: решение принимается по лучшей cosine similarity ---------------------
 
-@pytest.mark.parametrize("mode, expected_pairs", [("max", 1), ("topk_mean", 0)])
-def test_similarity_aggregation_mode(monkeypatch, mode, expected_pairs):
-    monkeypatch.setattr(Config, "MATCH_SIM_AGGREGATION", mode)
-    monkeypatch.setattr(Config, "MATCH_SIM_TOPK", 2)
+def test_matcher_uses_best_pair_similarity():
     matcher, t_storage, f_storage = make_matcher(threshold=0.63)
-    # одна пара идеальна (1.0), другая нулевая: max = 1.0, mean(top-2) = 0.5
+    # Лучшая пара имеет score=1.0, хотя вторая пара имеет score=0.0.
     add_tracklet(t_storage, 10, [unit(0), unit(1)])
     f_storage.searched = {1: np.array([unit(0)])}
 
     pairs = matcher._match(f_storage.searched, t_storage.storage[TrackletState.MOVE_UNMATCHED])
 
-    assert len(pairs) == expected_pairs
+    assert [(vehicle_id, tracklet.track_id) for vehicle_id, tracklet in pairs] == [(1, 10)]
 
 
 # --- FindStorage -------------------------------------------------------------

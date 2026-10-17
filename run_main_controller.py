@@ -911,19 +911,15 @@ def main() -> None:
                                         f"WAIT FEATURES {len(track_features)}/{runtime_reid.min_samples}"
                                     )
                                 continue
-                            # Keep the diagnostic log, but rank every viable pair by its
-                            # raw appearance score, including scores below the acceptance
-                            # threshold, so the runner-up is not silently ignored.
+                            # Rank viable handoff pairs by their best cosine similarity,
+                            # including scores below threshold so a runner-up is visible.
                             runtime_reid.match_track_to_journey(
                                 target_camera, int(candidate_id), int(journey_id)
                             )
-                            best_pair_score, mean_topk_score = RuntimeReID._similarity_scores(
+                            decision_score = RuntimeReID._best_similarity(
                                 track_features[-1:], identity_features
                             )
-                            decision_score = RuntimeReID._aggregate_similarity_score(
-                                best_pair_score, mean_topk_score
-                            )
-                            if best_pair_score >= 0.0:
+                            if decision_score >= 0.0:
                                 scored_pairs.append((
                                     float(decision_score), int(journey_id), int(candidate_id),
                                     int(arrival_frame), pending_index, arrival_index
@@ -1004,7 +1000,7 @@ def main() -> None:
                                 f"[REID HANDOFF WAIT] {source_camera}->{target_camera} "
                                 f"best_journey={best[1]} best_track={best[2]} "
                                 f"decision_score={best[0]:.3f} "
-                                f"aggregation={Config.MATCH_SIM_AGGREGATION} "
+                                "score_mode=best_similarity "
                                 f"threshold={runtime_reid.threshold:.3f} "
                                 f"second_score={second_score:.3f} required_margin={min_margin:.3f} "
                                 f"reason={reason}; keep searching"
