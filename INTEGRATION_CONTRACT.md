@@ -54,6 +54,6 @@ is accepted as an alternate field name.
 The shared registry exposes the exact decision rule for the controller integration:
 OCR must have **more than 5 votes** and mean OCR character confidence **strictly greater
 than 0.95**. Until then the decision is `PENDING`; after the threshold it is `MATCH`
-if the plate is in any active request, otherwise `REJECT`. This file defines the
-contract; controller-side provisional collection/cleanup must be wired to these hooks
-before enabling the integration in production.
+if the plate is in any active request, otherwise `REJECT`. The controller uses this registry when started through the integration entry point:
+it starts registration only when a search is active, waits for the strict OCR thresholds,
+notifies matching search IDs, and removes the rejected journey's temporary state and DB rows.
