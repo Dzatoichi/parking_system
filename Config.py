@@ -47,6 +47,14 @@ class Config:
 
     # Сеть камер и линии перехода (см. TopologyModule, проверка: python check_topology.py)
     TOPOLOGY_CONFIG_PATH = str(BASE_DIR / "topology.yaml")
+    # --- Детектор переходов между камерами ---
+    # Минимальное перемещение центра как доля диагонали bbox, а не фиксированные px.
+    # 0.02 = перемещение не менее 2% среднего размера автомобиля в кадре.
+    TRANSITION_MIN_MOVE_SIZE_RATIO = float(os.getenv("PARKING_TRANSITION_MIN_MOVE_SIZE_RATIO", "0.02"))
+    # Минимальная доля движения по нормали к линии (0..1); 0.5 соответствует cos угла.
+    TRANSITION_MIN_MOTION_ALIGNMENT = float(os.getenv("PARKING_TRANSITION_MIN_MOTION_ALIGNMENT", "0.5"))
+    # Допуск за концами линии в пикселях.
+    TRANSITION_LINE_ENDPOINT_TOLERANCE_PX = float(os.getenv("PARKING_TRANSITION_LINE_ENDPOINT_TOLERANCE_PX", "30"))
     # Детектор переходов: событие возникает, когда линия находится
     # между двумя границами bbox при движении автомобиля.
     # Сколько кадров центр должен находиться дальше release_margin_px,
