@@ -1,11 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-# Минимальный |cos| угла между движением и нормалью к линии.
-MIN_MOTION_ALIGNMENT = 0.5
-# Допуск за концами отрезка линии: bbox может немного выступить за p1/p2,
-# но автомобиль далеко за пределами линии не должен считаться пересёкшим её.
-LINE_ENDPOINT_TOLERANCE_PX = 30.0
+from Config import Config
 
 
 class Direction(Enum):
@@ -111,7 +107,7 @@ class TransitionLine:
             (px - self.p1[0]) * tx + (py - self.p1[1]) * ty
             for px, py in self._bbox_corners(bbox)
         ]
-        tolerance = LINE_ENDPOINT_TOLERANCE_PX
+        tolerance = Config.TRANSITION_LINE_ENDPOINT_TOLERANCE_PX
         return not (max(along) < -tolerance or min(along) > self.length + tolerance)
 
     def bbox_straddles_line(self, bbox, motion: tuple[float, float]) -> bool:
@@ -159,7 +155,7 @@ class TransitionLine:
         motion_length = (motion[0] ** 2 + motion[1] ** 2) ** 0.5
         if motion_length == 0:
             return False
-        if abs(motion_projection) / motion_length < MIN_MOTION_ALIGNMENT:
+        if abs(motion_projection) / motion_length < Config.TRANSITION_MIN_MOTION_ALIGNMENT:
             return False
 
         previous_center = (
@@ -215,7 +211,7 @@ class TransitionLine:
             (px - self.p1[0]) * tx + (py - self.p1[1]) * ty
             for px, py in (*previous_corners, *current_corners)
         ]
-        tolerance = LINE_ENDPOINT_TOLERANCE_PX
+        tolerance = Config.TRANSITION_LINE_ENDPOINT_TOLERANCE_PX
         return max(along) >= -tolerance and min(along) <= self.length + tolerance
 
     def center_crosses(self, previous_center, current_center) -> bool:
