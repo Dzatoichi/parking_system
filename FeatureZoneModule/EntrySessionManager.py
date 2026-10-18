@@ -163,6 +163,20 @@ class EntrySessionManager:
                 self._active_track_to_session.pop((camera_id, track_id), None)
             return session.as_dict()
 
+    def cancel_session(self, session_id: str, reason: str = "cancelled") -> dict[str, Any] | None:
+        """Cancel a session and release every camera-local track binding."""
+        with self._lock:
+            session = self._by_id.get(str(session_id))
+            if session is None:
+                return None
+            if session.status == "active":
+                session.status = "cancelled"
+                session.finish_reason = str(reason)
+            for camera_id, track_id in list(session.camera_tracks.items()):
+                self._active_track_to_session.pop((int(camera_id), int(track_id)), None)
+            self._seen_camera1_tracks.discard(int(session.camera_tracks.get(1, -1)))
+            return session.as_dict()
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
             session = self._by_id.get(session_id)
