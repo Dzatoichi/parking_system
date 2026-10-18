@@ -32,8 +32,11 @@ class _CrossingState:
     fired: bool = False
     missed: int = 0
     far_frames: int = 0
-    # Retain the last center off the line so an exact-on-line sample does not
-    # hide the crossing on the next frame.
+    # Anchor accumulates sub-threshold movement across frames. Without it, a
+    # slow vehicle can cross the line while every individual frame is rejected.
+    anchor_center: tuple[float, float] | None = None
+    anchor_bbox: object | None = None
+    # Last center off the line helps handle samples exactly on the line.
     last_nonzero_center: tuple[float, float] | None = None
 
 
@@ -138,21 +141,31 @@ class CrossingDetector:
         key = (track_id, line.line_id)
         state = self._states.setdefault(key, _CrossingState())
 
-        motion = (center[0] - prev[0], center[1] - prev[1])
+        # Keep an anchor until enough motion has accumulated. This makes the
+        # movement filter work over a short trajectory, not just one frame.
+        if state.anchor_center is None or state.anchor_bbox is None:
+            state.anchor_center = prev
+            state.anchor_bbox = prev_bbox
+
+        anchor = state.anchor_center
+        anchor_bbox = state.anchor_bbox
+        motion = (center[0] - anchor[0], center[1] - anchor[1])
         motion_length = (motion[0] ** 2 + motion[1] ** 2) ** 0.5
         current_side = line.signed_distance(center)
-        previous_side = line.signed_distance(prev)
+        anchor_side = line.signed_distance(anchor)
 
-        # This guard applies to every crossing route, including center crossings.
-        # A finite segment and perpendicular motion are mandatory; stationary
-        # tracks or motion along the line must not create transition events.
-        movement_ok = self._passes_min_movement(motion_length, prev_bbox, bbox)
+        movement_ok = self._passes_min_movement(motion_length, anchor_bbox, bbox)
         alignment = line.alignment(motion)
         near_debug_line = (
             line.camera_id == 2 and line.peer_camera == 9
-            and (abs(previous_side) <= 160 or abs(current_side) <= 160
-                 or previous_side * current_side < 0)
+            and (abs(anchor_side) <= 160 or abs(current_side) <= 160
+                 or anchor_side * current_side < 0)
         )
+
+        # Check accumulated motion before advancing the anchor. If the center
+        # has reached the other side but motion is still sub-threshold, retain
+        # the original-side anchor so the crossing remains observable.
+        opposite_sides = anchor_side * current_side < 0
         if not movement_ok or alignment < Config.TRANSITION_MIN_MOTION_ALIGNMENT:
             if near_debug_line:
                 print(
@@ -161,14 +174,19 @@ class CrossingDetector:
                     f"prev_center=({prev[0]:.1f},{prev[1]:.1f}) "
                     f"center=({center[0]:.1f},{center[1]:.1f}) "
                     f"motion=({motion[0]:.1f},{motion[1]:.1f}) "
-                    f"distance=({previous_side:.1f}->{current_side:.1f}) "
+                    f"distance=({anchor_side:.1f}->{current_side:.1f}) "
                     f"move_px={motion_length:.2f} alignment={alignment:.3f} "
                     f"required_alignment={Config.TRANSITION_MIN_MOTION_ALIGNMENT:.3f} "
-                    f"move_ratio={motion_length / ((self._bbox_diagonal(prev_bbox) + self._bbox_diagonal(bbox)) / 2.0):.4f} "
+                    f"move_ratio={motion_length / ((self._bbox_diagonal(anchor_bbox) + self._bbox_diagonal(bbox)) / 2.0):.4f} "
                     f"required_move_ratio={self.min_move_size_ratio:.4f} fired={state.fired}"
                 )
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
+            # Do not advance the anchor across the line while movement is
+            # below threshold; otherwise a slow crossing is lost permanently.
+            if not opposite_sides and movement_ok:
+                state.anchor_center = center
+                state.anchor_bbox = bbox
             if state.fired:
                 self._update_release_state(state, abs(current_side))
             return None
@@ -185,21 +203,18 @@ class CrossingDetector:
             self._update_release_state(state, abs(current_side))
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
+            state.anchor_center = center
+            state.anchor_bbox = bbox
             return None
 
-        # Exact-on-line samples can occur due to pixel quantization. If the previous
-        # center was exactly on the line, compare with the last known center on a
-        # definite side; this catches the crossing without treating a mere touch
-        # followed by a return to the same side as a transition.
-        crossing_origin = prev
-        if abs(previous_side) <= 1e-9 and state.last_nonzero_center is not None:
+        # If the anchor was exactly on the line, use the last definite-side
+        # sample as the origin rather than treating a touch as a crossing.
+        crossing_origin = anchor
+        if abs(anchor_side) <= 1e-9 and state.last_nonzero_center is not None:
             crossing_origin = state.last_nonzero_center
-        center_crossed = line.center_crosses(crossing_origin, center)
 
-        # Center-crossing is the normal case. If an object jumps completely over the
-        # line between sampled frames, the bbox-side test is the fallback. Merely
-        # bringing one bbox edge to the line is not enough to transfer cameras.
-        bbox_jumped = line.bbox_crosses_between(prev_bbox, bbox, motion)
+        center_crossed = line.center_crosses(crossing_origin, center)
+        bbox_jumped = line.bbox_crosses_between(anchor_bbox, bbox, motion)
         if not center_crossed and not bbox_jumped:
             if near_debug_line:
                 print(
@@ -208,17 +223,23 @@ class CrossingDetector:
                     f"bbox_jumped={bbox_jumped} "
                     f"prev_center=({prev[0]:.1f},{prev[1]:.1f}) "
                     f"center=({center[0]:.1f},{center[1]:.1f}) "
-                    f"distance=({previous_side:.1f}->{current_side:.1f}) "
+                    f"distance=({anchor_side:.1f}->{current_side:.1f}) "
                     f"alignment={alignment:.3f}"
                 )
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
+            # Motion was large enough but did not cross this finite segment;
+            # start a fresh accumulation window at the current observation.
+            state.anchor_center = center
+            state.anchor_bbox = bbox
             return None
 
         state.fired = True
         state.far_frames = 0
         if abs(current_side) > 1e-9:
             state.last_nonzero_center = center
+        state.anchor_center = center
+        state.anchor_bbox = bbox
 
         return TransitionEvent(
             camera_id=line.camera_id,
