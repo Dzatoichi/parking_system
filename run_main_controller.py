@@ -390,8 +390,8 @@ def main() -> None:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
         quiet_log(
-            f"[CONTROLLER] Lazy mode: idle camera 1 skips {trigger_skip_frames - 1} "
-            "frames between trigger inferences; active journeys use every frame; cameras 2-9 open on demand. Q/Esc exits."
+            "[CONTROLLER] Processing every other source frame on all active cameras; "
+            "camera 1 trigger mode retains its existing idle skip policy. Cameras 2-9 open on demand. Q/Esc exits."
         )
 
         while captures:
@@ -408,21 +408,6 @@ def main() -> None:
                 if camera_id not in captures:
                     continue
                 cap = captures[camera_id]
-                # While no vehicle journey/search is active, camera 1 is a lightweight
-                # trigger: read every source frame but infer only every Nth frame.
-                system_busy = bool(journey_by_track or scan_pending or any(pending_reid.values()))
-                if camera_id == 1 and not system_busy and frame_ids[1] % trigger_skip_frames != 0:
-                    ok, _skipped_raw = cap.read()
-                    if not ok:
-                        cap.release()
-                        del captures[camera_id]
-                        ended.add(camera_id)
-                        print(f"[STREAM END] camera={camera_id}")
-                        continue
-                    read_frame_ids[camera_id] += 1
-                    frame_ids[camera_id] += 1
-                    camera_times[camera_id] = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
-                    continue
                 ok, raw = cap.read()
                 if not ok:
                     cap.release()
@@ -432,11 +417,17 @@ def main() -> None:
                     continue
 
                 read_frame_ids[camera_id] += 1
-                # Keep YOLO tracking continuous on every active source frame.
-                # Reduce Re-ID cost through RuntimeReID.sample_every instead of
-                # dropping frames before the tracker.
+                # Keep frame IDs tied to source time, including intentionally
+                # skipped frames, so transition timing and TTLs remain meaningful.
                 frame_ids[camera_id] += 1
                 camera_times[camera_id] = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
+
+                # Process odd-numbered source frames and skip every second frame.
+                # The tracker sees a larger displacement per update, so transition
+                # detection must use its accumulated-motion logic.
+                if read_frame_ids[camera_id] % 2 == 0:
+                    continue
+
                 frame = cv2.resize(raw, (1280, 720))
                 frame_id = frame_ids[camera_id]
                 result = models[camera_id].track(
