@@ -180,7 +180,9 @@ class CrossingDetector:
                     f"move_ratio={motion_length / ((self._bbox_diagonal(anchor_bbox) + self._bbox_diagonal(bbox)) / 2.0):.4f} "
                     f"required_move_ratio={self.min_move_size_ratio:.4f} fired={state.fired}"
                 )
-            if abs(current_side) > 1e-9:
+            if abs(current_side) > 1e-9 and not (
+                abs(anchor_side) <= 1e-9 and state.last_nonzero_center is not None
+            ):
                 state.last_nonzero_center = center
             # Do not advance the anchor across the line while movement is
             # below threshold; otherwise a slow crossing is lost permanently.
