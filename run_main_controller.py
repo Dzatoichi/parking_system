@@ -95,10 +95,9 @@ def quiet_log(*args, **kwargs):
     if any(tag in message for tag in (
         "[CONTROLLER]", "[DATABASE]", "[STREAM]", "[STREAM ERROR]", "[STREAM END]",
         "[TOPOLOGY WARNING]", "[SCAN FIFO WARNING]", "[SESSION BIND WARNING]",
-        "[REGISTER]", "[FEATURE SAMPLE]", "[GALLERY CLOSED]", "[ROUTE]",
-        "[TRANSITION]", "[REID IDENTIFIED]", "[MATCH]", "[SCAN FIFO MATCH]",
-        "[UNIDENTIFIED HANDOFF]", "[AMBIGUOUS EXIT]", "[GALLERY WAITING FOR EXIT]",
-        "[REID EXPIRED]", "[REID HANDOFF WAIT]", "[DISPLAY FOCUS]",
+        "[REGISTER]", "[GALLERY CLOSED]", "[TRANSITION]", "[REID IDENTIFIED]",
+        "[SCAN FIFO MATCH]", "[UNIDENTIFIED HANDOFF]", "[AMBIGUOUS EXIT]",
+        "[GALLERY WAITING FOR EXIT]", "[REID EXPIRED]", "[REID HANDOFF WAIT]",
     )):
         print(message, **kwargs)
 
@@ -644,24 +643,6 @@ def main() -> None:
                     feature_decisions = feature_managers[camera_id].process_frame(
                         camera_id, frame_id, frame, tracks
                     )
-                    for sampled_track_id, accepted in feature_decisions.items():
-                        if not accepted:
-                            continue
-                        gallery = feature_managers[camera_id]._galleries.get(
-                            (camera_id, int(sampled_track_id))
-                        )
-                        if gallery is not None:
-                            sample_journey = journey_by_track.get((camera_id, int(sampled_track_id)))
-                            sample_plate = (
-                                best_plate(journey_plate_votes.get(int(sample_journey), {}))[0]
-                                if sample_journey is not None
-                                else best_plate(plate_votes.get((camera_id, int(sampled_track_id)), {}))[0]
-                            )
-                            quiet_log(
-                                f"[FEATURE SAMPLE] camera={camera_id} "
-                                f"lane={gallery.zone_profile} local_id={sampled_track_id} "
-                                f"plate={sample_plate} samples={len(gallery.original)}"
-                            )
                     active_ids = {
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
                         if cam == camera_id
@@ -918,10 +899,6 @@ def main() -> None:
                         next_route_node = "scan" if command.camera_id in SCAN_CAMERAS else str(command.camera_id)
                         if not route or route[-1] != next_route_node:
                             route.append(next_route_node)
-                        quiet_log(
-                            f"[ROUTE] journey={journey_number} "
-                            f"{command.source_camera}->{command.camera_id} route={route_label(journey_number)}"
-                        )
                         finish_gallery(command.source_camera, command.track_id, journey_number)
                         # Camera 1 has no topology transitions. Topology EXIT advances the search;
                         # Re-ID is diagnostic and must never block the next-camera handoff.
@@ -934,14 +911,6 @@ def main() -> None:
                         )
                         plate_for_task, _ = best_plate(journey_plate_votes.get(int(journey_number), {}))
                         gallery_count = len(runtime_reid.identity_gallery.get(int(journey_number), []))
-                        quiet_log(
-                            f"[REID TASK CREATED] source={command.source_camera} "
-                            f"target={command.camera_id} route={command.source_camera}->{command.camera_id} "
-                            f"journey={journey_number} plate={plate_for_task} "
-                            f"gallery_features={gallery_count} "
-                            f"target_start_frame={frame_ids.get(command.camera_id, 0)} "
-                            f"pending_for_route={len(pending_reid[pair])}"
-                        )
                         if database is not None and journey_number > 0:
                             database.record_event(
                                 command.source_camera, command.track_id, command.frame_id,
@@ -963,8 +932,9 @@ def main() -> None:
                             else f"LOCAL {int(command.track_id)}"
                         )
                         quiet_log(
-                            f"[TRANSITION] camera={command.source_camera} "
-                            f"{command.source_camera}->{command.camera_id} {transition_label}"
+                            f"[TRANSITION] {command.source_camera}->{command.camera_id} "
+                            f"local_id={command.track_id} plate={label_plate} "
+                            f"reid={journey_number} route={route_label(journey_number)}"
                         )
                         # Target stream is already active; never start/seek it on a handoff.
 
@@ -981,19 +951,12 @@ def main() -> None:
                             )
                         pair = (int(command.source_camera), int(command.camera_id))
                         arrived_candidates[pair].append((int(command.track_id), int(command.frame_id)))
+                        # One concise console event per crossed destination line.
                         quiet_log(
-                            f"[TRANSITION] camera={command.camera_id} "
-                            f"{command.source_camera}->{command.camera_id}"
-                        )
-                        quiet_log(
-                            f"[REID ARRIVAL] camera={command.camera_id} track={command.track_id} "
-                            f"route={command.source_camera}->{command.camera_id} frame={command.frame_id} "
-                            f"arrivals_for_route={len(arrived_candidates[pair])} "
-                            f"pending_for_route={len(pending_reid.get(pair, []))}"
-                        )
-                        quiet_log(
-                            f"[BARRIER ARRIVAL] {pair[0]}->{pair[1]} "
-                            f"track={command.track_id} position={len(arrived_candidates[pair])}"
+                            f"[TRANSITION] {command.source_camera}->{command.camera_id} "
+                            f"local_id={command.track_id} route={route_label("
+                            f"journey_by_track.get((command.camera_id, int(command.track_id))"
+                            f"))}"
                         )
 
                 # Scores shown over boxes must correspond to all journeys actively
@@ -1260,11 +1223,11 @@ def main() -> None:
                                 match_plate, _ = best_plate(journey_plate_votes.get(int(journey_id), {}))
                                 match_label = match_plate if match_plate != "UNKNOWN" else f"LOCAL {candidate_id}"
                                 quiet_log(
-                                    f"[REID IDENTIFIED] camera={target_camera} local_id={candidate_id} "
-                                    f"from={source_camera} reid={journey_id} plate={match_plate} "
-                                    f"best_sim={score:.4f} route={route_label(journey_id)}"
+                                    f"[REID IDENTIFIED] camera={target_camera} "
+                                    f"local_id={candidate_id} reid={journey_id} "
+                                    f"plate={match_plate} sim={score:.4f} "
+                                    f"route={route_label(journey_id)}"
                                 )
-                                quiet_log(f"[MATCH] {source_camera}->{target_camera} {match_label}")
                         else:
                             reason = "below_similarity_threshold"
                             reid_candidate_status[(target_camera, int(best[2]))] = (
@@ -1458,16 +1421,31 @@ def main() -> None:
                     cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
 
                     label_parts = [f"LOCAL {track_id}"]
-                    source_label = route_source_label(camera_id, track_id, global_id)
-                    label_parts.append(f"FROM {source_label}")
-                    if global_id is not None:
-                        label_parts.append(f"REID {global_id}")
-                        plate_label, _ = best_plate(journey_plate_votes.get(int(global_id), {}))
-                        if plate_label != "UNKNOWN":
-                            label_parts.append(f"PLATE {plate_label}")
-                    if camera_id != 1 or reid_label != "NO REID SCORE":
-                        label_parts.append(reid_label)
-                    label_parts.append(f"ROUTE {route_label(global_id)}")
+                    if camera_id in SCAN_CAMERAS:
+                        # The scan stage is independent of downstream Re-ID: show only
+                        # the local tracker ID and the plate recognized in this stage.
+                        scan_plate = (
+                            best_plate(journey_plate_votes.get(int(global_id), {}))[0]
+                            if global_id is not None
+                            else best_plate(plate_votes.get((camera_id, int(track_id)), {}))[0]
+                        )
+                        if scan_plate != "UNKNOWN":
+                            label_parts.append(scan_plate)
+                    else:
+                        # Downstream cameras show only the best candidate's score and
+                        # the plate that score belongs to; route details stay in console.
+                        if candidate_scores:
+                            best_score, best_journey, best_plate_label = candidate_scores[0]
+                        elif overlay_state is not None:
+                            best_score = float(overlay_state["score"])
+                            best_journey = int(overlay_state["journey_id"])
+                            best_plate_label = str(overlay_state.get("plate", "UNKNOWN"))
+                        else:
+                            best_score, best_journey, best_plate_label = None, None, "UNKNOWN"
+                        if best_score is not None:
+                            label_parts.append(f"{best_score:.2f}")
+                            if best_plate_label != "UNKNOWN":
+                                label_parts.append(best_plate_label)
                     draw_text_label(display, box, " | ".join(label_parts), color)
 
                 # Camera 1 builds the registration gallery but has no route topology lines.
