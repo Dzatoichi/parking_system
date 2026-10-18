@@ -24,15 +24,25 @@ class Config:
     # Set unused sources to "". Scan/gallery capture runs on cameras 1-3;
     # general RuntimeReID matching uses cameras 2-9. These are separate pipelines.
     CAMERA_VIDEO_PATHS = {
-        1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/one-time/vezd.mov"),
-        2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/one-time/sboku.mov"),
-        3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/szadi.mov"),
-        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/one-time/5007.mov"),
-        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/one-time/5005_vniz.mov"),
-        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/one-time/5005_vverh.mov"),
-        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/one-time/5003_vniz.mov"),
-        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/one-time/5003_vverh.mov"),
-        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/one-time/5009.mov"),
+        # 1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/one-time/vezd.mov"),
+        # 2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/one-time/sboku.mov"),
+        # 3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/one-time/szadi.mov"),
+        # 4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/one-time/5007.mov"),
+        # 5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/one-time/5005_vniz.mov"),
+        # 6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/one-time/5005_vverh.mov"),
+        # 7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/one-time/5003_vniz.mov"),
+        # 8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/one-time/5003_vverh.mov"),
+        # 9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/one-time/5009.mov"),
+
+        1: os.getenv("PARKING_CAMERA_1_VIDEO", "videos/test_videos/3/vezd.ts"),
+        2: os.getenv("PARKING_CAMERA_2_VIDEO", "videos/test_videos/3/sboku.ts"),
+        3: os.getenv("PARKING_CAMERA_3_VIDEO", "videos/test_videos/2/szadi.mp4"),
+        4: os.getenv("PARKING_CAMERA_4_VIDEO", "videos/test_videos/2/5007.mp4"),
+        5: os.getenv("PARKING_CAMERA_5_VIDEO", "videos/test_videos/2/5005_vniz.mp4"),
+        6: os.getenv("PARKING_CAMERA_6_VIDEO", "videos/test_videos/2/5005_vverh.mp4"),
+        7: os.getenv("PARKING_CAMERA_7_VIDEO", "videos/test_videos/3/5003_vniz.ts"),
+        8: os.getenv("PARKING_CAMERA_8_VIDEO", "videos/test_videos/3/5003_vverh.ts"),
+        9: os.getenv("PARKING_CAMERA_9_VIDEO", "videos/test_videos/3/5009.ts"),
 
         # 1: os.getenv("PARKING_CAMERA_1_VIDEO", "../video/22-04/cam1.ts"),
         # 2: os.getenv("PARKING_CAMERA_2_VIDEO", "../video/22-04/cam2.ts"),
@@ -50,7 +60,7 @@ class Config:
     # --- Детектор переходов между камерами ---
     # Минимальное перемещение центра как доля диагонали bbox, а не фиксированные px.
     # 0.02 = перемещение не менее 2% среднего размера автомобиля в кадре.
-    TRANSITION_MIN_MOVE_SIZE_RATIO = float(os.getenv("PARKING_TRANSITION_MIN_MOVE_SIZE_RATIO", "0.02"))
+    TRANSITION_MIN_MOVE_SIZE_RATIO = float(os.getenv("PARKING_TRANSITION_MIN_MOVE_SIZE_RATIO", "0.005"))
     # Минимальная доля движения по нормали к линии (0..1); 0.5 соответствует cos угла.
     TRANSITION_MIN_MOTION_ALIGNMENT = float(os.getenv("PARKING_TRANSITION_MIN_MOTION_ALIGNMENT", "0.5"))
     # Допуск за концами линии в пикселях.
