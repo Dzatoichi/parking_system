@@ -146,7 +146,27 @@ class CrossingDetector:
         # This guard applies to every crossing route, including center crossings.
         # A finite segment and perpendicular motion are mandatory; stationary
         # tracks or motion along the line must not create transition events.
-        if not self._passes_min_movement(motion_length, prev_bbox, bbox) or line.alignment(motion) < Config.TRANSITION_MIN_MOTION_ALIGNMENT:
+        movement_ok = self._passes_min_movement(motion_length, prev_bbox, bbox)
+        alignment = line.alignment(motion)
+        near_debug_line = (
+            line.camera_id == 2 and line.peer_camera == 9
+            and (abs(previous_side) <= 160 or abs(current_side) <= 160
+                 or previous_side * current_side < 0)
+        )
+        if not movement_ok or alignment < Config.TRANSITION_MIN_MOTION_ALIGNMENT:
+            if near_debug_line:
+                print(
+                    f"[TRANSITION DEBUG] camera=2 target=9 frame={frame_id} track={track_id} "
+                    f"line={line.line_id} reject={'movement' if not movement_ok else 'alignment'} "
+                    f"prev_center=({prev[0]:.1f},{prev[1]:.1f}) "
+                    f"center=({center[0]:.1f},{center[1]:.1f}) "
+                    f"motion=({motion[0]:.1f},{motion[1]:.1f}) "
+                    f"distance=({previous_side:.1f}->{current_side:.1f}) "
+                    f"move_px={motion_length:.2f} alignment={alignment:.3f} "
+                    f"required_alignment={Config.TRANSITION_MIN_MOTION_ALIGNMENT:.3f} "
+                    f"move_ratio={motion_length / ((self._bbox_diagonal(prev_bbox) + self._bbox_diagonal(bbox)) / 2.0):.4f} "
+                    f"required_move_ratio={self.min_move_size_ratio:.4f} fired={state.fired}"
+                )
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
             if state.fired:
@@ -156,6 +176,12 @@ class CrossingDetector:
         # After an event, wait for a meaningful, sustained departure from the line
         # before allowing another event for the same track and line.
         if state.fired:
+            if near_debug_line:
+                print(
+                    f"[TRANSITION DEBUG] camera=2 target=9 frame={frame_id} track={track_id} "
+                    f"line={line.line_id} reject=already_fired distance={current_side:.1f} "
+                    f"fired_frames={state.far_frames}"
+                )
             self._update_release_state(state, abs(current_side))
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
@@ -175,6 +201,16 @@ class CrossingDetector:
         # bringing one bbox edge to the line is not enough to transfer cameras.
         bbox_jumped = line.bbox_crosses_between(prev_bbox, bbox, motion)
         if not center_crossed and not bbox_jumped:
+            if near_debug_line:
+                print(
+                    f"[TRANSITION DEBUG] camera=2 target=9 frame={frame_id} track={track_id} "
+                    f"line={line.line_id} reject=geometry center_crossed={center_crossed} "
+                    f"bbox_jumped={bbox_jumped} "
+                    f"prev_center=({prev[0]:.1f},{prev[1]:.1f}) "
+                    f"center=({center[0]:.1f},{center[1]:.1f}) "
+                    f"distance=({previous_side:.1f}->{current_side:.1f}) "
+                    f"alignment={alignment:.3f}"
+                )
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
             return None
