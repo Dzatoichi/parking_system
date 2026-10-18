@@ -952,11 +952,14 @@ def main() -> None:
                         pair = (int(command.source_camera), int(command.camera_id))
                         arrived_candidates[pair].append((int(command.track_id), int(command.frame_id)))
                         # One concise console event per crossed destination line.
+                        arrived_journey = journey_by_track.get(
+                            (command.camera_id, int(command.track_id))
+                        )
                         quiet_log(
                             f"[TRANSITION] {command.source_camera}->{command.camera_id} "
-                            f"local_id={command.track_id} route={route_label("
-                            f"journey_by_track.get((command.camera_id, int(command.track_id))"
-                            f"))}"
+                            f"local_id={command.track_id} "
+                            f"reid={arrived_journey if arrived_journey is not None else '-'} "
+                            f"route={route_label(arrived_journey)}"
                         )
 
                 # Scores shown over boxes must correspond to all journeys actively
@@ -1225,7 +1228,7 @@ def main() -> None:
                                 quiet_log(
                                     f"[REID IDENTIFIED] camera={target_camera} "
                                     f"local_id={candidate_id} reid={journey_id} "
-                                    f"plate={match_plate} sim={score:.4f} "
+                                    f"plate={match_plate} {score:.4f} "
                                     f"route={route_label(journey_id)}"
                                 )
                         else:
