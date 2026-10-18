@@ -344,9 +344,14 @@ def main() -> None:
             sample_count = len(gallery.get("original", []))
             feature_count = sample_count + len(gallery.get("flipped", []))
             lane = str(gallery.get("zone_profile", "UNKNOWN")).upper()
+            plate_label = (
+                best_plate(journey_plate_votes.get(int(journey_number), {}))[0]
+                if journey_number is not None
+                else best_plate(plate_votes.get((camera_id, int(track_id)), {}))[0]
+            )
             quiet_log(
                 f"[GALLERY CLOSED] camera={camera_id} lane={lane} local_id={track_id} "
-                f"samples={sample_count} embeddings={feature_count} "
+                f"plate={plate_label} samples={sample_count} embeddings={feature_count} "
                 f"journey={journey_number if journey_number is not None else '-'} "
                 f"route={route_label(journey_number)}"
             )
@@ -646,10 +651,16 @@ def main() -> None:
                             (camera_id, int(sampled_track_id))
                         )
                         if gallery is not None:
+                            sample_journey = journey_by_track.get((camera_id, int(sampled_track_id)))
+                            sample_plate = (
+                                best_plate(journey_plate_votes.get(int(sample_journey), {}))[0]
+                                if sample_journey is not None
+                                else best_plate(plate_votes.get((camera_id, int(sampled_track_id)), {}))[0]
+                            )
                             quiet_log(
                                 f"[FEATURE SAMPLE] camera={camera_id} "
                                 f"lane={gallery.zone_profile} local_id={sampled_track_id} "
-                                f"samples={len(gallery.original)}"
+                                f"plate={sample_plate} samples={len(gallery.original)}"
                             )
                     active_ids = {
                         tid for cam, tid in feature_managers[camera_id].active_track_keys()
@@ -1451,6 +1462,9 @@ def main() -> None:
                     label_parts.append(f"FROM {source_label}")
                     if global_id is not None:
                         label_parts.append(f"REID {global_id}")
+                        plate_label, _ = best_plate(journey_plate_votes.get(int(global_id), {}))
+                        if plate_label != "UNKNOWN":
+                            label_parts.append(f"PLATE {plate_label}")
                     if camera_id != 1 or reid_label != "NO REID SCORE":
                         label_parts.append(reid_label)
                     label_parts.append(f"ROUTE {route_label(global_id)}")
