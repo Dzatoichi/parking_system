@@ -48,7 +48,7 @@ cameras:
   - id: 2
     name: "Камера 2"
     lines: 
-      - {id: 1, p1: [500, 100], p2: [800, 100], peer: 9, exit: UP}
+      - {id: 1, p1: [500, 70], p2: [800, 70], peer: 9, exit: UP}
       - {id: 2, p1: [1000, 100], p2: [1000, 650], peer: 4, exit: RIGHT}
 
   - id: 3
@@ -62,31 +62,30 @@ cameras:
     lines: 
       - {id: 1, p1: [70, 250], p2: [270, 250], peer: 2, exit: UP}
       - {id: 2, p1: [70, 250], p2: [270, 250], peer: 3, exit: UP}
-      - {id: 3, p1: [650, 270], p2: [1250, 270], peer: 5, exit: UP}
 
   - id: 5
     name: "Камера 5"
     lines: 
-      - {id: 1, p1: [800, 50], p2: [1200, 50], peer: 4, exit: UP}
-      - {id: 2, p1: [440, 400], p2: [1250, 400], peer: 6, exit: DOWN}
+      - {id: 1, p1: [800, 50], p2: [1280, 50], peer: 4, exit: UP}
+      - {id: 2, p1: [440, 400], p2: [1280, 400], peer: 6, exit: DOWN}
 
   - id: 6
     name: "Камера 6"
     lines: 
-      - {id: 1, p1: [1000, 100], p2: [1200, 100], peer: 7, exit: UP}
-      - {id: 2, p1: [550, 400], p2: [1250, 400], peer: 5, exit: DOWN}
+      - {id: 1, p1: [1000, 100], p2: [1280, 100], peer: 7, exit: UP}
+      - {id: 2, p1: [550, 400], p2: [1280, 400], peer: 5, exit: DOWN}
 
   - id: 7
     name: "Камера 7"
     lines: 
-      - {id: 1, p1: [1000, 150], p2: [1250, 150], peer: 6, exit: UP}
-      - {id: 2, p1: [600, 450], p2: [1250, 450], peer: 8, exit: DOWN}
+      - {id: 1, p1: [1000, 150], p2: [1280, 150], peer: 6, exit: UP}
+      - {id: 2, p1: [600, 450], p2: [1280, 450], peer: 8, exit: DOWN}
 
   - id: 8
     name: "Камера 8"
     lines: 
       - {id: 1, p1: [900, 100], p2: [1100, 100], peer: 9, exit: UP}
-      - {id: 2, p1: [600, 450], p2: [1250, 450], peer: 7, exit: DOWN}
+      - {id: 2, p1: [600, 450], p2: [1280, 450], peer: 7, exit: DOWN}
 
   - id: 9
     name: "Камера 9"
