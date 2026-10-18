@@ -5,11 +5,8 @@ from typing import Any, Optional, Union
 
 import yaml
 
-from TopologyModule.TransitionLine import (
-    MIN_MOTION_ALIGNMENT,
-    Direction,
-    TransitionLine,
-)
+from Config import Config
+from TopologyModule.TransitionLine import Direction, TransitionLine
 
 # Система координат линий. Tracking.py приводит кадр к 1280x720 до трекинга.
 DEFAULT_FRAME_SIZE = (1280, 720)
@@ -276,7 +273,7 @@ def _parse_line(
 
     # Направление выезда должно идти поперёк линии, иначе "туда" и "обратно" не различить
     alignment = line.alignment(exit_direction.vector)
-    if alignment < MIN_MOTION_ALIGNMENT:
+    if alignment < Config.TRANSITION_MIN_MOTION_ALIGNMENT:
         problems.append(
             f"{where}: направление выезда {exit_direction.value} почти параллельно линии, "
             f"туда и обратно не различить. Выберите направление поперёк линии"
