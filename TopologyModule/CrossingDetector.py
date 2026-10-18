@@ -4,7 +4,7 @@ from typing import Iterable, Optional
 
 from Config import Config
 from TopologyModule.CameraNetwork import Camera
-from TopologyModule.TransitionLine import MIN_MOTION_ALIGNMENT, Role, TransitionLine
+from TopologyModule.TransitionLine import Role, TransitionLine
 
 
 @dataclass(frozen=True)
@@ -52,11 +52,10 @@ class CrossingDetector:
             forget_frames: Optional[int] = None,
     ):
         self.camera = camera
-        # Параметр оставлен для совместимости конструктора старого кода.
-        # Факт движения определяется по разнице центров двух последовательных bbox.
-        self.min_move_px = (
-            Config.TRANSITION_MIN_MOVE_PX if min_move_px is None else min_move_px
-        )
+        # Явный min_move_px оставлен для обратной совместимости.
+        # По умолчанию движение нормируется на размер bbox, чтобы учитывать перспективу.
+        self.min_move_px = min_move_px
+        self.min_move_size_ratio = Config.TRANSITION_MIN_MOVE_SIZE_RATIO
         self.release_frames = (
             Config.TRANSITION_RELEASE_FRAMES if release_frames is None else release_frames
         )
@@ -104,7 +103,27 @@ class CrossingDetector:
     def is_moving(self, track_id: int) -> bool:
         """True when the latest bbox-center displacement passes the movement filter."""
         motion = self._motion_by_track.get(int(track_id), (0.0, 0.0))
-        return (motion[0] ** 2 + motion[1] ** 2) ** 0.5 >= self.min_move_px
+        motion_length = (motion[0] ** 2 + motion[1] ** 2) ** 0.5
+        if self.min_move_px is not None:
+            return motion_length >= self.min_move_px
+        bbox = self._prev_bbox.get(int(track_id))
+        return bbox is not None and motion_length / self._bbox_diagonal(bbox) >= self.min_move_size_ratio
+
+    @staticmethod
+    def _bbox_diagonal(bbox) -> float:
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        width = abs(x2 - x1)
+        height = abs(y2 - y1)
+        return max((width * width + height * height) ** 0.5, 1.0)
+
+    def _passes_min_movement(self, motion_length: float, previous_bbox, current_bbox) -> bool:
+        # Legacy callers may still pass an absolute pixel threshold explicitly.
+        if self.min_move_px is not None:
+            return motion_length >= self.min_move_px
+        previous_size = self._bbox_diagonal(previous_bbox)
+        current_size = self._bbox_diagonal(current_bbox)
+        reference_size = (previous_size + current_size) / 2.0
+        return motion_length / reference_size >= self.min_move_size_ratio
 
     def _update_crossing(
             self,
@@ -127,7 +146,7 @@ class CrossingDetector:
         # This guard applies to every crossing route, including center crossings.
         # A finite segment and perpendicular motion are mandatory; stationary
         # tracks or motion along the line must not create transition events.
-        if motion_length < self.min_move_px or line.alignment(motion) < MIN_MOTION_ALIGNMENT:
+        if not self._passes_min_movement(motion_length, prev_bbox, bbox) or line.alignment(motion) < Config.TRANSITION_MIN_MOTION_ALIGNMENT:
             if abs(current_side) > 1e-9:
                 state.last_nonzero_center = center
             if state.fired:
