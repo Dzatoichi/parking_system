@@ -29,6 +29,7 @@ from DB.parking_repository import ParkingRepository
 from RuntimeReID import RuntimeReID
 from TopologyModule.CameraNetwork import CameraNetwork
 from TopologyModule.TransitionTracker import CommandType, create_trackers
+from IntegrationModule.search_registry import get_registry, integration_enabled
 
 
 ROOT = Path(__file__).resolve().parent
@@ -150,6 +151,8 @@ def draw_text_label(image, box, label: str, color) -> None:
 
 def main() -> None:
     started_at = time.time()
+    search_registry = get_registry()
+    integration_mode = integration_enabled()
     reid_matches: list[dict] = []
     reid_expired: list[dict] = []
     database = ParkingRepository() if Config.DB_ENABLED else None
@@ -218,6 +221,7 @@ def main() -> None:
     reid_overlay_state: dict[tuple[int, int], dict] = {}
     scan_exclusion_logged: set[tuple[int, int]] = set()
     registered_tracks: set[tuple[int, int]] = set()
+    rejected_tracks: set[tuple[int, int]] = set()
     plate_votes: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     journey_plate_votes: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     feature_closed = Counter()
@@ -307,7 +311,9 @@ def main() -> None:
 
     def start_registration(track_id: int, frame_id: int, current_tracks) -> None:
         key = (1, int(track_id))
-        if key in registered_tracks:
+        if key in registered_tracks or key in rejected_tracks:
+            return
+        if integration_mode and not search_registry.has_active_searches():
             return
         entry_bbox = next((box for tid, box in current_tracks if int(tid) == int(track_id)), None)
         entry_lane = feature_managers[1]._matching_profile(1, entry_bbox) if entry_bbox is not None else None
@@ -414,6 +420,39 @@ def main() -> None:
             f"LOCAL {track_id} plate={plate} votes={sum(vote_summary.values())}"
         )
         plate_votes.pop((camera_id, int(track_id)), None)
+
+    def discard_rejected_journey(journey_number: int, reason: str = "plate_not_requested") -> None:
+        """Drop temporary state and persistence for a confidently rejected plate."""
+        nonlocal scan_pending
+        journey_number = int(journey_number)
+        session_id = session_by_journey.pop(journey_number, None)
+        session_data = sessions.cancel_session(session_id, reason) if session_id else None
+        track_keys = set()
+        if session_data:
+            track_keys.update((int(cam), int(tid)) for cam, tid in session_data.get("camera_tracks", {}).items())
+        track_keys.update(key for key, gid in list(journey_by_track.items()) if int(gid) == journey_number)
+        for cam, tid in track_keys:
+            if cam == 1:
+                rejected_tracks.add((cam, tid))
+            journey_by_track.pop((cam, tid), None)
+            registered_tracks.discard((cam, tid))
+            plate_votes.pop((cam, tid), None)
+            track_last_seen.pop((cam, tid), None)
+            runtime_reid.forget_track(cam, tid)
+            reid_overlay_state.pop((cam, tid), None)
+            reid_candidate_scores.pop((cam, tid), None)
+            reid_candidate_status.pop((cam, tid), None)
+            if cam in feature_managers:
+                feature_managers[cam].end_track(cam, tid)
+        scan_pending = [item for item in scan_pending if int(item[0]) != journey_number]
+        scan_source_track_by_journey.pop(journey_number, None)
+        scan_camera2_journeys.discard(journey_number)
+        journey_routes.pop(journey_number, None)
+        journey_plate_votes.pop(journey_number, None)
+        search_registry.reset_journey(journey_number)
+        if database is not None and journey_number > 0:
+            database.delete_vehicle(journey_number)
+        quiet_log(f"[INTEGRATION REJECT] journey={journey_number} reason={reason}; temporary state removed")
 
     # Only camera 1 is open initially, acting as a lightweight trigger.
     # Scan cameras 2-3 and route cameras 4-9 are opened on demand.
@@ -808,6 +847,27 @@ def main() -> None:
                                 best_plate(journey_plate_votes[int(global_id)])
                                 if global_id is not None else (local_plate, local_conf)
                             )
+                            if integration_mode and global_id is not None:
+                                winning_votes = len(journey_plate_votes[int(global_id)].get(journey_plate, []))
+                                decision = search_registry.decide_plate(
+                                    int(global_id), journey_plate, winning_votes, journey_conf
+                                )
+                                if decision == "MATCH":
+                                    zone_profile = feature_managers[1]._matching_profile(1, _bbox)
+                                    zone_label = str(zone_profile).upper()
+                                    if "LEFT" in zone_label:
+                                        zone_label = "LEFT"
+                                    elif "RIGHT" in zone_label:
+                                        zone_label = "RIGHT"
+                                    search_registry.notify_found(
+                                        journey_id=int(global_id), plate=journey_plate,
+                                        camera_id=int(camera_id), zone=zone_label,
+                                        local_track_id=int(tid),
+                                    )
+                                elif decision == "REJECT":
+                                    discard_rejected_journey(int(global_id))
+                                    continue
+
                             quiet_log(
                                 f"[OCR DIAG] camera={camera_id} frame={frame_id} "
                                 f"video_time={camera_times.get(camera_id, 0.0):.3f} "
@@ -1297,6 +1357,7 @@ def main() -> None:
                     journey_by_track.pop(stale_key, None)
                     track_last_seen.pop(stale_key, None)
                     registered_tracks.discard(stale_key)
+                    rejected_tracks.discard(stale_key)
                     plate_votes.pop(stale_key, None)
                     runtime_reid.forget_track(camera_id, stale_track_id)
                     reid_overlay_state.pop(stale_key, None)
