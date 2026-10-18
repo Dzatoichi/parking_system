@@ -248,6 +248,25 @@ class ParkingRepository:
              float(score) if score is not None else None, Json(details or {})),
         )
 
+    def delete_vehicle(self, global_id: int) -> None:
+        """Delete one provisional journey and all dependent rows atomically."""
+        global_id = int(global_id)
+        # Embeddings may still be buffered and not yet inserted into PostgreSQL.
+        self._pending_embeddings = [row for row in self._pending_embeddings if int(row[0]) != global_id]
+        if self.connection is None or self.connection.closed:
+            self.connect()
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("DELETE FROM parking_plate_read WHERE global_id=%s", (global_id,))
+                cursor.execute("DELETE FROM parking_embedding WHERE global_id=%s", (global_id,))
+                cursor.execute("DELETE FROM parking_track_event WHERE global_id=%s", (global_id,))
+                cursor.execute("DELETE FROM parking_vehicle WHERE global_id=%s", (global_id,))
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            logger.exception("Failed to delete rejected provisional journey %s", global_id)
+            raise
+
     def update_vehicle_status(self, global_id: int, status: str) -> None:
         self._run(
             "UPDATE parking_vehicle SET status=%s, updated_at=NOW() WHERE global_id=%s",
