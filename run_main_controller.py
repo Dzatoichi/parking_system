@@ -197,7 +197,6 @@ def main() -> None:
     read_frame_ids: dict[int, int] = defaultdict(int)
     camera_times: dict[int, float] = defaultdict(float)
     ended: set[int] = set()
-    trigger_skip_frames = max(1, int(getattr(Config, "TRIGGER_SKIP_FRAMES", 3)))
 
     # Labels describe a journey, not a camera-local BoT-SORT ID.
     journey_by_track: dict[tuple[int, int], int] = {}
@@ -390,8 +389,8 @@ def main() -> None:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(WINDOW_NAME, 1280, 720)
         quiet_log(
-            "[CONTROLLER] Processing every other source frame on all active cameras; "
-            "camera 1 trigger mode retains its existing idle skip policy. Cameras 2-9 open on demand. Q/Esc exits."
+            "[CONTROLLER] Processing every other source frame on all active cameras. "
+            "Cameras 2-9 open on demand. Q/Esc exits."
         )
 
         while captures:
