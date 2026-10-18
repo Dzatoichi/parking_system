@@ -6,6 +6,7 @@ adapter is implemented by the backend team.
 """
 from __future__ import annotations
 
+import os
 import signal
 import threading
 import traceback
@@ -15,6 +16,7 @@ from IntegrationModule.search_registry import get_registry
 
 
 def main() -> None:
+    os.environ.setdefault("PARKING_INTEGRATION_MODE", "1")
     from run_main_controller import main as controller_main
 
     stop_event = threading.Event()
