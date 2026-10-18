@@ -205,8 +205,15 @@ class TransitionLine:
     def _swept_along_line_overlaps(self, previous_corners, current_corners) -> bool:
         """Проверяет overlap проекций двух bbox вдоль линии с самим отрезком."""
         nx, ny = self.normal
+        normal_length = self.length
+        if normal_length == 0:
+            return False
+        nx /= normal_length
+        ny /= normal_length
         tx, ty = ny, -nx
 
+        # tx/ty are a unit tangent vector, so the projection is measured in
+        # pixels and can be compared directly with line length and tolerance.
         along = [
             (px - self.p1[0]) * tx + (py - self.p1[1]) * ty
             for px, py in (*previous_corners, *current_corners)
