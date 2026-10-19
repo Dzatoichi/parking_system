@@ -4,8 +4,6 @@ This is a transport-neutral boundary for the backend/broker team. No broker vend
 is selected here; the colleague implementing transport supplies a small adapter.
 
 ## Start
-
-- Standalone existing mode: `python run_main_controller.py`
 - Integration entry point: `PARKING_INTEGRATION_MODE=1 python -m IntegrationModule.entrypoint`
 - Optional adapter class: `PARKING_BROKER_ADAPTER=package.module:AdapterClass`
 
